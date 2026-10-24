@@ -40,6 +40,7 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 | `services/scoring.py` | Placeholder trip pricing and progress math; replaced by `analytics/finance.py` |
 | `services/demo.py` | Labeled demo crews for the leaderboard |
 | `store.py` | Temporary in-memory storage; replaced by Tiger Data |
+| `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Production stack: the API behind Caddy with automatic HTTPS. See [`docs/deploy.md`](../docs/deploy.md) |
 
 ## Next steps
 
@@ -47,4 +48,4 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 2. Pricing: call `analytics/finance.py` from `services/scoring.py`.
 3. Vehicle lookup on fueleconomy.gov.
 4. Live game: `POST /games` and `WS /ws/games/{code}`.
-5. Deploy to Vultr (Docker Compose + Caddy for HTTPS).
+5. Deploy to Vultr: follow [`docs/deploy.md`](../docs/deploy.md).

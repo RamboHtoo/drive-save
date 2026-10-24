@@ -1,0 +1,9 @@
+# Docker builds use the repo root as context (backend/docker-compose.yml).
+# Send only what the API image needs.
+**
+!backend/
+!analytics/
+backend/.venv/
+backend/.env
+**/__pycache__/
+**/.pytest_cache/
