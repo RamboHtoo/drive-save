@@ -1,0 +1,36 @@
+{
+  "client_trip_id": "6f1c2a9e-4b7d-4c1e-9a3f-2d8e5b7c1a40",
+  "started_at": "2026-10-24T20:01:00Z",
+  "ended_at": "2026-10-24T20:19:00Z",
+  "distance_mi": 6.4,
+  "avg_speed_mph": 21.3,
+  "events": [
+    {
+      "type": "harsh_brake",
+      "ts": "2026-10-24T20:07:12Z",
+      "peak_g": 0.41,
+      "speed_before_mph": 34.0,
+      "speed_after_mph": 12.0,
+      "lat": 40.7934,
+      "lng": -77.8600
+    },
+    {
+      "type": "rapid_accel",
+      "ts": "2026-10-24T20:09:40Z",
+      "peak_g": 0.33,
+      "speed_before_mph": 8.0,
+      "speed_after_mph": 27.0,
+      "lat": 40.7962,
+      "lng": -77.8551
+    },
+    {
+      "type": "sharp_turn",
+      "ts": "2026-10-24T20:14:05Z",
+      "peak_g": 0.44,
+      "speed_before_mph": 22.0,
+      "speed_after_mph": 20.0,
+      "lat": 40.8011,
+      "lng": -77.8619
+    }
+  ]
+}

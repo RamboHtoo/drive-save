@@ -1,0 +1,78 @@
+{
+  "trip_id": "df1a0d92-9124-41db-bdfd-d4d5d2791ec0",
+  "distance_mi": 6.4,
+  "fuel_gal": 0.256,
+  "fuel_cost_usd": 1.1,
+  "avoidable_fuel_usd": 0.1,
+  "events": [
+    {
+      "type": "harsh_brake",
+      "ts": "2026-10-24T20:07:12Z",
+      "speed_before_mph": 34.0,
+      "speed_after_mph": 12.0,
+      "cost_usd": 0.06
+    },
+    {
+      "type": "rapid_accel",
+      "ts": "2026-10-24T20:09:40Z",
+      "speed_before_mph": 8.0,
+      "speed_after_mph": 27.0,
+      "cost_usd": 0.04
+    },
+    {
+      "type": "sharp_turn",
+      "ts": "2026-10-24T20:14:05Z",
+      "speed_before_mph": 22.0,
+      "speed_after_mph": 20.0,
+      "cost_usd": 0.0
+    }
+  ],
+  "projection": {
+    "yearly_usd": 216.0,
+    "basis": "this trip's waste per mile x 13,476 mi/yr (FHWA average)"
+  },
+  "assumptions": [
+    {
+      "key": "gas_price",
+      "value": 4.284,
+      "unit": "USD/gal",
+      "source_url": "https://www.eia.gov/dnav/pet/pet_pri_gnd_dcus_nus_w.htm",
+      "as_of": "2026-10-19",
+      "is_estimate": false
+    },
+    {
+      "key": "mpg",
+      "value": 25.0,
+      "unit": "mi/gal",
+      "source_url": null,
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "mileage_penalty_cap",
+      "value": 0.4,
+      "unit": "fraction",
+      "source_url": "https://www.fueleconomy.gov/feg/driveHabits.jsp",
+      "as_of": "2026-10-24",
+      "is_estimate": false
+    },
+    {
+      "key": "events_per_mile_at_cap",
+      "value": 2.0,
+      "unit": "events/mi",
+      "source_url": null,
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "yearly_miles",
+      "value": 13476.0,
+      "unit": "mi/yr",
+      "source_url": "https://www.fhwa.dot.gov/ohim/onh00/bar8.htm",
+      "as_of": "2026-10-24",
+      "is_estimate": false
+    }
+  ],
+  "is_estimate": true,
+  "is_demo": false
+}
