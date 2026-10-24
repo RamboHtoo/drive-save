@@ -2,6 +2,7 @@
 
 import copy
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,17 @@ def new_user(client, nickname="alex"):
     assert res.status_code == 201
     body = res.json()
     return body["user_id"], {"Authorization": f"Bearer {body['token']}"}
+
+
+def fresh_trip(events=None):
+    """The sample trip as a new trip: new client_trip_id and event ids, optionally fewer events."""
+    trip = copy.deepcopy(SAMPLE_TRIP)
+    trip["client_trip_id"] = str(uuid.uuid4())
+    for event in trip["events"]:
+        event["event_id"] = str(uuid.uuid4())
+    if events is not None:
+        trip["events"] = trip["events"][:events]
+    return trip
 
 
 def upload(client, headers, trip=None):
@@ -151,27 +163,40 @@ def test_wrong_join_code_is_rejected(client):
     assert client.get(f"/crews/{crew['crew_id']}", headers=outsider).json()["join_code"] is None
 
 
-def test_leaderboard_ranks_active_crews_with_demo_crews(client):
-    _, creator = new_user(client, "creator")
-    crew = client.post("/crews", json={"name": "Real Crew"}, headers=creator).json()
-    board = client.get("/leaderboard", headers=creator).json()
-    assert all(s["is_demo"] for s in board["standings"])  # 1-member crew is not ranked yet
-
-    for name in ["b", "c", "d"]:
+def test_leaderboard_ranks_members_inside_the_callers_crew(client):
+    _, alex = new_user(client, "alex")
+    crew = client.post("/crews", json={"name": "Roommates"}, headers=alex).json()
+    members = {"alex": alex}
+    for name in ["blake", "casey", "drew"]:
         _, headers = new_user(client, name)
         client.post(f"/crews/{crew['crew_id']}/join", json={"join_code": crew["join_code"]}, headers=headers)
+        members[name] = headers
 
-    board = client.get("/leaderboard?scope=crews", headers=creator).json()
-    names = [s["name"] for s in board["standings"]]
-    assert "Real Crew" in names
-    assert [s["rank"] for s in board["standings"]] == list(range(1, len(names) + 1))
+    # Alex and Blake drive a 3-trip baseline (3 events each) and then a smoother trip; Blake's is smoother.
+    for name, later_events in [("alex", 2), ("blake", 1)]:
+        for _ in range(3):
+            upload(client, members[name], fresh_trip())
+        upload(client, members[name], fresh_trip(events=later_events))
+
+    board = client.get("/leaderboard", headers=members["drew"]).json()
+    assert (board["crew_name"], board["member_count"], board["active"]) == ("Roommates", 4, True)
+    assert [(s["nickname"], s["rank"], s["improvement_pct"]) for s in board["standings"]] == [
+        ("blake", 1, 66.7),
+        ("alex", 2, 33.3),
+        ("casey", None, None),  # no baseline yet: listed last, unranked
+        ("drew", None, None),
+    ]
 
 
-def test_member_leaderboard_needs_crew_id(client):
+def test_leaderboard_needs_a_crew_and_turns_active_at_four(client):
     _, headers = new_user(client)
-    res = client.get("/leaderboard?scope=members", headers=headers)
-    assert res.status_code == 400
-    assert res.json()["error"]["code"] == "crew_id_required"
+    res = client.get("/leaderboard", headers=headers)
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "not_in_crew"
+
+    client.post("/crews", json={"name": "Solo"}, headers=headers)
+    board = client.get("/leaderboard", headers=headers).json()
+    assert (board["member_count"], board["active"]) == (1, False)
 
 
 def test_progress_sets_baseline_after_three_trips(client):

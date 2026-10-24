@@ -31,7 +31,7 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | `POST /crews` | Create a crew; the creator joins automatically | Done (in memory) |
 | `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done (in memory) |
 | `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done (in memory) |
-| `GET /leaderboard` | Rivalry standings | Done; includes two labeled demo crews |
+| `GET /leaderboard` | The members of your crew, ranked against each other | Done |
 
 Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/demo/reset`.
 
@@ -97,13 +97,14 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 
 ## Crews and leaderboard
 
-- A crew is **active** once it has 4 or more members. Only active crews are ranked.
+**Drivers compete against each other inside their crew.** Crews don't compete with other crews.
+
 - A driver belongs to one crew at a time. Creating or joining another crew moves them out of their current one.
+- The competition counts once the crew has 4 or more members (`active: true`).
 - `join_code` is 6 characters (no 0/O or 1/I), case-insensitive, and only returned to members. Put `crew_id` and `join_code` in the QR code.
-- `GET /leaderboard?scope=crews` ranks crews against each other. `GET /leaderboard?scope=members&crew_id=...` ranks the members of one crew (members only).
-- `improvement_pct` = (baseline − this week's waste per mile) ÷ baseline × 100. The baseline is a driver's first 3 trips.
-- Each standing has a generic `id`: the `crew_id` for `scope=crews`, the `user_id` for `scope=members`.
-- Standings with `is_demo: true` are demo data. Always label them in the UI.
+- `GET /leaderboard` (no parameters) ranks the members of your crew. If you aren't in a crew it returns `404` with `not_in_crew`.
+- `improvement_pct` = (baseline − later trips' waste per mile) ÷ baseline × 100. The baseline is a driver's first 3 trips. Drivers without a complete baseline or a later trip come last, with `rank: null` and `improvement_pct: null`.
+- `is_demo: true` on the leaderboard means a demo crew. Always label it in the UI.
 
 ## Notes for the skeleton
 

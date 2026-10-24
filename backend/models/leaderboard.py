@@ -4,29 +4,28 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, Field
 
 
-class Scope(str, Enum):
-    crews = "crews"  # crew vs crew
-    members = "members"  # members inside one crew; requires crew_id
-
-
 class Period(str, Enum):
     week = "week"
 
 
 class Standing(BaseModel):
-    rank: int
-    id: UUID = Field(description="crew_id for scope=crews, user_id for scope=members")
-    name: str
-    members: int | None = Field(default=None, description="Member count; only for scope=crews")
-    improvement_pct: float = Field(description="(baseline - this week's waste per mile) / baseline x 100")
+    rank: int | None = Field(description="1 = most improved; None until the driver has a complete baseline and a later trip")
+    user_id: UUID
+    nickname: str
+    improvement_pct: float | None = Field(description="(baseline - later waste per mile) / baseline x 100; None while unranked")
     est_savings_usd: float
-    is_demo: bool = False
+    trips_counted: int
 
 
 class Leaderboard(BaseModel):
-    scope: Scope
+    """Members of one crew ranked against each other. Crews don't compete with other crews."""
+
+    crew_id: UUID
+    crew_name: str
+    member_count: int
+    active: bool = Field(description="True once the crew has 4 or more members")
     period: Period
-    crew_id: UUID | None = None
     generated_at: AwareDatetime
-    standings: list[Standing]
+    standings: list[Standing] = Field(description="Ranked drivers first, then unranked drivers")
+    is_demo: bool = False
     is_estimate: bool = True

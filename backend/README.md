@@ -40,7 +40,6 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 | `models/cost_model.py` | What the cost model receives and returns. See [`docs/cost-model.md`](../docs/cost-model.md) |
 | `services/cost_model.py` | Builds the cost model input and calls the model. Placeholder: $1 per event until the real model lands |
 | `services/scoring.py` | Baselines, improvement and estimated savings per driver |
-| `services/demo.py` | Labeled demo crews for the leaderboard |
 | `store.py` | Temporary in-memory storage; replaced by Tiger Data |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Production stack: the API behind Caddy with automatic HTTPS. See [`docs/deploy.md`](../docs/deploy.md) |
 
