@@ -1,34 +1,25 @@
-from pydantic import BaseModel, Field
+"""The driver's car, exactly as the app sends it.
+
+The app picks the car from the EPA dataset and sends that car's fields. The
+backend never reads or reshapes them: it stores the object and hands it to the
+cost model unchanged, so field names are agreed between the app and the model.
+"""
+
+import json
+
+from pydantic import JsonValue, RootModel, model_validator
+
+MAX_FIELDS = 200
+MAX_BYTES = 20_000
 
 
-class VehicleOption(BaseModel):
-    vehicle_id: int
-    description: str = Field(description='Transmission and engine, e.g. "Auto (AV-S7), 4 cyl, 1.5 L, Turbo"')
-
-
-class VehicleSelect(BaseModel):
-    vehicle_id: int = Field(gt=0, description="From GET /vehicles/options")
-
-
-class VehicleSpecs(BaseModel):
-    """One exact car (model year, make, model, engine and transmission), from fueleconomy.gov."""
-
-    vehicle_id: int
-    year: int
-    make: str
-    model: str
-    vehicle_class: str | None = Field(description='EPA size class, e.g. "Midsize Cars"')
-    fuel_type: str | None = Field(description='e.g. "Regular Gasoline", "Premium Gasoline", "Diesel", "Electricity"')
-    powertrain: str | None = Field(description='EPA alternative-fuel type such as "Hybrid", "Plug-in Hybrid", "EV" or "FCV"; None for a regular gas car')
-    transmission: str | None
-    drive: str | None
-    cylinders: int | None
-    engine_displacement_l: float | None
-    mpg_city: float = Field(description="EPA city MPG (MPGe for electric and hydrogen cars)")
-    mpg_hwy: float
-    mpg_combined: float
-    kwh_per_100mi: float | None = Field(description="Electricity use; electric cars only")
-    epa_annual_fuel_cost_usd: float | None = Field(description="EPA's estimated annual fuel cost for this car")
-    weight_lb: float | None = Field(default=None, description="Not provided by fueleconomy.gov; None until a weight source is added")
-    weight_source: str | None = None
-    source_url: str
+class VehicleData(RootModel[dict[str, JsonValue]]):
+    @model_validator(mode="after")
+    def check_size(self) -> "VehicleData":
+        if not self.root:
+            raise ValueError("vehicle data needs at least one field")
+        if len(self.root) > MAX_FIELDS:
+            raise ValueError(f"vehicle data can have at most {MAX_FIELDS} fields")
+        if len(json.dumps(self.root)) > MAX_BYTES:
+            raise ValueError(f"vehicle data must be under {MAX_BYTES} bytes")
+        return self

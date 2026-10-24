@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import JsonValue
+
 from models.trips import TripCreate
-from models.vehicles import VehicleSpecs
 
 
 @dataclass
@@ -17,7 +18,7 @@ class UserRecord:
     user_id: UUID
     nickname: str
     token_hash: str
-    vehicle: VehicleSpecs | None = None
+    vehicle: dict[str, JsonValue] | None = None  # as sent by the app
 
 
 @dataclass
@@ -36,7 +37,7 @@ class TripRecord:
     trip: TripCreate
     uploaded_at: datetime
     # The car selected at upload time, so later car changes don't rewrite old receipts.
-    vehicle: VehicleSpecs | None = None
+    vehicle: dict[str, JsonValue] | None = None
 
 
 users: dict[UUID, UserRecord] = {}

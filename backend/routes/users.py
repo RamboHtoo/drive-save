@@ -6,8 +6,8 @@ import store
 from auth import get_current_user, hash_token, new_token
 from errors import ApiError
 from models.users import Progress, UserCreate, UserCreated
-from models.vehicles import VehicleSelect, VehicleSpecs
-from services import fueleconomy, scoring
+from models.vehicles import VehicleData
+from services import scoring
 
 router = APIRouter(tags=["users"])
 
@@ -21,17 +21,18 @@ async def create_user(body: UserCreate) -> UserCreated:
     return UserCreated(user_id=user.user_id, nickname=user.nickname, token=token)
 
 
-@router.put("/users/me/vehicle", response_model=VehicleSpecs)
-async def set_vehicle(body: VehicleSelect, user: store.UserRecord = Depends(get_current_user)) -> VehicleSpecs:
-    user.vehicle = await fueleconomy.vehicle(body.vehicle_id)
-    return user.vehicle
+@router.put("/users/me/vehicle", response_model=VehicleData)
+async def set_vehicle(body: VehicleData, user: store.UserRecord = Depends(get_current_user)) -> VehicleData:
+    """Stores the car's data as sent; trips uploaded from now on carry it to the cost model."""
+    user.vehicle = body.root
+    return body
 
 
-@router.get("/users/me/vehicle", response_model=VehicleSpecs)
-async def get_vehicle(user: store.UserRecord = Depends(get_current_user)) -> VehicleSpecs:
+@router.get("/users/me/vehicle", response_model=VehicleData)
+async def get_vehicle(user: store.UserRecord = Depends(get_current_user)) -> VehicleData:
     if user.vehicle is None:
-        raise ApiError(404, "vehicle_not_set", "Pick a car first with PUT /users/me/vehicle")
-    return user.vehicle
+        raise ApiError(404, "vehicle_not_set", "Send the car first with PUT /users/me/vehicle")
+    return VehicleData(user.vehicle)
 
 
 @router.get("/users/{user_id}/progress", response_model=Progress)

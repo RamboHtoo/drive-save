@@ -14,7 +14,7 @@ Replace its body, or import your function there, and keep the signature. The sch
 
 ## Real inputs to build against
 
-- [`fixtures/sample-cost-input.json`](../fixtures/sample-cost-input.json): a complete input for the sample trip in a 2020 Honda Civic 4Dr, with real fueleconomy.gov data.
+- [`fixtures/sample-cost-input.json`](../fixtures/sample-cost-input.json): a complete input for the sample trip, with the car from [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json) (a real EPA Test Car List row).
 - `GET /trips/{trip_id}/cost-input` on the live server returns exactly what the model receives for any trip you uploaded.
 
 ## Input
@@ -50,21 +50,9 @@ Optional fields can be null, so the model needs a fallback for each.
 
 ### `vehicle`
 
-A snapshot of the car selected when the trip was uploaded, from fueleconomy.gov. Null if the driver hasn't picked a car.
+The car's data exactly as the app sent it with `PUT /users/me/vehicle`, as of when the trip was uploaded. Null if the app never sent one. The backend passes it through without reading it, so you and the app agree on the field names and units. Example: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json), built from a real EPA Test Car List row (2026 Honda Civic 4DR, 1.5 L, manual): test weight 3,250 lb and road-load coefficients A, B, C (the force needed to keep moving at speed v is A + B·v + C·v²).
 
-| Field | Unit | Notes |
-| --- | --- | --- |
-| `vehicle_id`, `year`, `make`, `model` | | |
-| `vehicle_class` | | EPA size class, for example "Midsize Cars" |
-| `fuel_type` | | For example "Regular Gasoline", "Premium Gasoline", "Diesel", "Electricity" |
-| `powertrain` | | "Hybrid", "Plug-in Hybrid", "EV", "FCV" and so on; null for a regular gas car. Hybrids and EVs recover braking energy |
-| `transmission`, `drive`, `cylinders` | | |
-| `engine_displacement_l` | L | |
-| `mpg_city`, `mpg_hwy`, `mpg_combined` | mi/gal | MPGe for electric and hydrogen cars |
-| `kwh_per_100mi` | kWh/100 mi | Electric cars only |
-| `epa_annual_fuel_cost_usd` | USD/yr | EPA's estimate |
-| `weight_lb`, `weight_source` | lb | **Always null today**: fueleconomy.gov has no weight data |
-| `source_url` | | The fueleconomy.gov record |
+**Heads-up on the EPA fuel economy numbers:** the Test Car List's `RND_ADJ_FE` values are lab test-cycle results, well above real-world (window-sticker) MPG. For the car above, the file shows 35.8 (city cycle) and 56.3 (highway cycle), while fueleconomy.gov's label for the same car is 27 city / 37 highway / 31 combined. Using the lab numbers as-is would underestimate fuel use by roughly a quarter to a third.
 
 ## Output
 
@@ -78,9 +66,9 @@ A snapshot of the car selected when the trip was uploaded, from fueleconomy.gov.
 
 | Data | Status | Notes |
 | --- | --- | --- |
-| Vehicle weight | Planned: comes with the selected car, from the data teammate's vehicle data | Must be matchable to fueleconomy.gov's `vehicle_id` (or year, make, model and engine) so the backend can attach it to `vehicle.weight_lb` |
 | Fuel price ($/gal) and electricity price ($/kWh) | Planned: the data teammate provides them | The backend adds them to the input once the format is agreed |
 | Trip location | Open | Picks the regional price; trips without events have no coordinates today |
 | Elevation change | Open, optional | Speeding up uphill takes extra energy; braking downhill is often unavoidable. The phone can measure it with GPS altitude or the barometer |
-| Road-load coefficients A, B, C | Open, optional | The force needed to keep moving at speed v: F = A + B·v + C·v². Separates the energy normal driving needs from waste. Listed in the EPA Test Car List next to the test weight |
 | Idle time, stop count, time at high speed, event confidence, temperature, load | Open, could | Each shifts efficiency a little |
+
+Vehicle weight and road-load coefficients come in the EPA vehicle data the app sends.

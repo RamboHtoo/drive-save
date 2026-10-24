@@ -2,7 +2,7 @@
 
 build_input() gathers everything the cost model needs: the trip, each event's
 speeds, acceleration, duration, turn angle and the speed trace around it, and
-the car's specs.
+the car's data exactly as the app sent it.
 estimate() is the cost model itself. It's a placeholder that charges a flat $1
 per harsh event; the analytics teammate replaces its body (or imports their
 function here) and keeps the signature CostModelInput -> CostModelOutput.

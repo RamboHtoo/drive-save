@@ -1,6 +1,6 @@
 {
   "trip": {
-    "trip_id": "62b57206-c28e-4d53-a92b-6df53440c45c",
+    "trip_id": "86e1d44d-1794-4dce-8b72-d2da7860d4ac",
     "started_at": "2026-10-24T20:01:00Z",
     "ended_at": "2026-10-24T20:19:00Z",
     "duration_s": 1080.0,
@@ -8,25 +8,23 @@
     "avg_speed_mph": 21.3
   },
   "vehicle": {
-    "vehicle_id": 42150,
-    "year": 2020,
-    "make": "Honda",
-    "model": "Civic 4Dr",
-    "vehicle_class": "Midsize Cars",
-    "fuel_type": "Regular Gasoline",
-    "powertrain": null,
-    "transmission": "Automatic (variable gear ratios)",
-    "drive": "Front-Wheel Drive",
+    "model_year": 2026,
+    "make": "HONDA",
+    "model": "CIVIC 4DR",
+    "vehicle_type": "Car",
+    "displacement_l": 1.5,
     "cylinders": 4,
-    "engine_displacement_l": 1.5,
-    "mpg_city": 32.0,
-    "mpg_hwy": 42.0,
-    "mpg_combined": 36.0,
-    "kwh_per_100mi": null,
-    "epa_annual_fuel_cost_usd": 1800.0,
-    "weight_lb": null,
-    "weight_source": null,
-    "source_url": "https://www.fueleconomy.gov/ws/rest/vehicle/42150"
+    "rated_horsepower": 200,
+    "transmission": "Manual",
+    "gears": 6,
+    "drive": "2-Wheel Drive, Front",
+    "equivalent_test_weight_lb": 3250,
+    "target_coef_a_lbf": 25.28,
+    "target_coef_b_lbf_per_mph": 0.1298,
+    "target_coef_c_lbf_per_mph2": 0.01746,
+    "city_test_mpg": 35.8,
+    "highway_test_mpg": 56.3,
+    "test_fuel": "Tier 2 Cert Gasoline"
   },
   "events": [
     {

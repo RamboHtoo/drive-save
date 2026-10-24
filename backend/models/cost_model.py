@@ -6,10 +6,9 @@ CostModelOutput, and the backend turns that into the receipt. See docs/cost-mode
 
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, JsonValue
 
 from models.trips import Assumption, EventType, SpeedSample
-from models.vehicles import VehicleSpecs
 
 
 class TripInput(BaseModel):
@@ -40,7 +39,9 @@ class EventInput(BaseModel):
 
 class CostModelInput(BaseModel):
     trip: TripInput
-    vehicle: VehicleSpecs | None = Field(description="The car selected when the trip was uploaded; None if the driver hasn't picked one")
+    vehicle: dict[str, JsonValue] | None = Field(
+        description="The car's data exactly as the app sent it (PUT /users/me/vehicle), as of the trip's upload; None if it never sent one"
+    )
     events: list[EventInput]
 
 

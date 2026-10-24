@@ -3,36 +3,17 @@
 import copy
 import json
 from pathlib import Path
-from urllib.error import URLError
 
 import pytest
 from fastapi.testclient import TestClient
 
 import store
 from main import app
-from services import cost_model, fueleconomy
+from services import cost_model
 
-SAMPLE_TRIP = json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "sample-trip.json").read_text())
-DATA = Path(__file__).resolve().parent / "data"
-
-# Recorded fueleconomy.gov responses, keyed by (path, sorted query params).
-FAKE_FUELECONOMY = {
-    ("menu/year", ()): {"menuItem": [{"text": "2021", "value": "2021"}, {"text": "2020", "value": "2020"}]},
-    ("menu/make", (("year", 2020),)): {"menuItem": [{"text": "Honda", "value": "Honda"}, {"text": "Toyota", "value": "Toyota"}]},
-    ("menu/model", (("make", "Honda"), ("year", 2020))): {
-        "menuItem": [{"text": "Civic 4Dr", "value": "Civic 4Dr"}, {"text": "Clarity FCV", "value": "Clarity FCV"}]
-    },
-    ("menu/options", (("make", "Honda"), ("model", "Civic 4Dr"), ("year", 2020))): {
-        "menuItem": [
-            {"text": "Auto (variable gear ratios), 4 cyl, 1.5 L, Turbo", "value": "42150"},
-            {"text": "Man 6-spd, 4 cyl, 2.0 L", "value": "42151"},
-        ]
-    },
-    # A model with a single option comes back as an object, not a list.
-    ("menu/options", (("make", "Honda"), ("model", "Clarity FCV"), ("year", 2020))): {"menuItem": {"text": "Auto (A1)", "value": "47535"}},
-    ("42150", ()): json.loads((DATA / "fueleconomy-42150.json").read_text()),
-    ("47535", ()): json.loads((DATA / "fueleconomy-47535.json").read_text()),
-}
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+SAMPLE_TRIP = json.loads((FIXTURES / "sample-trip.json").read_text())
+SAMPLE_VEHICLE = json.loads((FIXTURES / "sample-vehicle.json").read_text())
 
 
 @pytest.fixture(autouse=True)
@@ -45,14 +26,6 @@ def clean_store():
 @pytest.fixture
 def client():
     return TestClient(app)
-
-
-@pytest.fixture
-def fake_fueleconomy(monkeypatch):
-    async def fake_get(path, **params):
-        return FAKE_FUELECONOMY.get((path, tuple(sorted(params.items()))))
-
-    monkeypatch.setattr(fueleconomy, "_get", fake_get)
 
 
 @pytest.fixture
@@ -218,68 +191,44 @@ def test_progress_sets_baseline_after_three_trips(client):
     assert progress["est_savings_usd"] == 2.0
 
 
-def test_car_picker_walks_year_make_model_option(client, fake_fueleconomy):
-    _, headers = new_user(client)
-    assert client.get("/vehicles/years", headers=headers).json() == [2021, 2020]
-    assert client.get("/vehicles/makes?year=2020", headers=headers).json() == ["Honda", "Toyota"]
-    assert client.get("/vehicles/models?year=2020&make=Honda", headers=headers).json() == ["Civic 4Dr", "Clarity FCV"]
-    assert client.get("/vehicles/models?year=2020&make=NoSuchMake", headers=headers).json() == []
-
-    civic = client.get("/vehicles/options", params={"year": 2020, "make": "Honda", "model": "Civic 4Dr"}, headers=headers).json()
-    assert civic[0] == {"vehicle_id": 42150, "description": "Auto (variable gear ratios), 4 cyl, 1.5 L, Turbo"}
-    single = client.get("/vehicles/options", params={"year": 2020, "make": "Honda", "model": "Clarity FCV"}, headers=headers).json()
-    assert single == [{"vehicle_id": 47535, "description": "Auto (A1)"}]
-
-
-def test_vehicle_specs_come_from_fueleconomy(client, fake_fueleconomy):
-    _, headers = new_user(client)
-    civic = client.get("/vehicles/42150", headers=headers).json()
-    assert (civic["year"], civic["make"], civic["model"]) == (2020, "Honda", "Civic 4Dr")
-    assert (civic["mpg_city"], civic["mpg_hwy"], civic["mpg_combined"]) == (32, 42, 36)
-    assert civic["fuel_type"] == "Regular Gasoline"
-    assert civic["powertrain"] is None
-    assert (civic["cylinders"], civic["engine_displacement_l"]) == (4, 1.5)
-    assert civic["kwh_per_100mi"] is None
-    assert civic["weight_lb"] is None  # fueleconomy.gov has no weight data
-
-    fuel_cell = client.get("/vehicles/47535", headers=headers).json()
-    assert fuel_cell["powertrain"] == "FCV"
-    assert (fuel_cell["cylinders"], fuel_cell["engine_displacement_l"]) == (None, None)
-
-    missing = client.get("/vehicles/1", headers=headers)
-    assert missing.status_code == 404
-    assert missing.json()["error"]["code"] == "vehicle_not_found"
-
-
-def test_driver_selects_a_car(client, fake_fueleconomy):
+def test_driver_sends_their_car_and_gets_it_back_unchanged(client):
     _, headers = new_user(client)
     assert client.get("/users/me/vehicle", headers=headers).json()["error"]["code"] == "vehicle_not_set"
-    selected = client.put("/users/me/vehicle", json={"vehicle_id": 42150}, headers=headers)
-    assert selected.status_code == 200
-    assert client.get("/users/me/vehicle", headers=headers).json() == selected.json()
+    saved = client.put("/users/me/vehicle", json=SAMPLE_VEHICLE, headers=headers)
+    assert saved.status_code == 200
+    assert saved.json() == SAMPLE_VEHICLE
+    assert client.get("/users/me/vehicle", headers=headers).json() == SAMPLE_VEHICLE
 
 
-def test_fueleconomy_outage_returns_502(client, monkeypatch):
-    def unreachable(url):
-        raise URLError("offline")
-
-    monkeypatch.setattr(fueleconomy, "_fetch", unreachable)
-    monkeypatch.setattr(fueleconomy, "_cache", {})
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],  # not an object
+        "HONDA CIVIC",  # not an object
+        {},  # no fields
+        {f"field_{i}": i for i in range(201)},  # too many fields
+    ],
+)
+def test_vehicle_data_must_be_a_reasonable_object(client, body):
     _, headers = new_user(client)
-    res = client.get("/vehicles/makes?year=2019", headers=headers)
-    assert res.status_code == 502
-    assert res.json()["error"]["code"] == "vehicle_data_unavailable"
+    res = client.put("/users/me/vehicle", json=body, headers=headers)
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "validation_error"
 
 
-def test_cost_model_receives_every_trip_event_and_vehicle_field(client, fake_fueleconomy, model_inputs):
+def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_inputs):
     _, headers = new_user(client)
-    client.put("/users/me/vehicle", json={"vehicle_id": 42150}, headers=headers)
+    # Any fields the app sends, including ones the backend has never heard of, must reach the model untouched.
+    car = {**SAMPLE_VEHICLE, "trim": {"name": "Si", "tags": ["sport", "manual"]}, "is_hybrid": False, "notes": None}
+    client.put("/users/me/vehicle", json=car, headers=headers)
     trip_id = upload(client, headers).json()["trip_id"]
     client.get(f"/trips/{trip_id}/receipt", headers=headers)
 
     inputs = model_inputs[-1]
-    # The car: everything fueleconomy.gov returned for the selected vehicle.
-    assert inputs.vehicle.model_dump(mode="json") == client.get("/vehicles/42150", headers=headers).json()
+    # The car: exactly what the app sent, with the same types.
+    assert inputs.vehicle == car
+    assert type(inputs.vehicle["equivalent_test_weight_lb"]) is int
+    assert type(inputs.vehicle["target_coef_c_lbf_per_mph2"]) is float
     # The trip.
     assert str(inputs.trip.trip_id) == trip_id
     assert inputs.trip.distance_mi == SAMPLE_TRIP["distance_mi"]
@@ -348,20 +297,20 @@ def test_cost_model_input_without_car_or_optional_fields(client, model_inputs):
     assert receipt["avoidable_cost_usd"] == len(trip["events"])  # the placeholder still prices every event
 
 
-def test_receipt_keeps_the_car_from_upload_time(client, fake_fueleconomy):
+def test_receipt_keeps_the_car_from_upload_time(client):
     _, headers = new_user(client)
-    client.put("/users/me/vehicle", json={"vehicle_id": 42150}, headers=headers)
+    client.put("/users/me/vehicle", json=SAMPLE_VEHICLE, headers=headers)
     trip_id = upload(client, headers).json()["trip_id"]
-    client.put("/users/me/vehicle", json={"vehicle_id": 47535}, headers=headers)  # switch cars afterwards
+    client.put("/users/me/vehicle", json={"make": "TOYOTA", "model": "PRIUS"}, headers=headers)  # switch cars afterwards
 
     cost_input = client.get(f"/trips/{trip_id}/cost-input", headers=headers).json()
-    assert cost_input["vehicle"]["vehicle_id"] == 42150
+    assert cost_input["vehicle"] == SAMPLE_VEHICLE
 
 
-def test_cost_input_endpoint_matches_model_input_and_is_owner_only(client, fake_fueleconomy, model_inputs):
+def test_cost_input_endpoint_matches_model_input_and_is_owner_only(client, model_inputs):
     _, owner = new_user(client, "owner")
     _, other = new_user(client, "other")
-    client.put("/users/me/vehicle", json={"vehicle_id": 42150}, headers=owner)
+    client.put("/users/me/vehicle", json=SAMPLE_VEHICLE, headers=owner)
     trip_id = upload(client, owner).json()["trip_id"]
     client.get(f"/trips/{trip_id}/receipt", headers=owner)
 

@@ -22,10 +22,8 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | --- | --- | --- |
 | `GET /health` | Deployment check (no auth) | Done |
 | `POST /users` | Create a user; returns `user_id` and `token` (no auth) | Done (in memory) |
-| `GET /vehicles/years`, `/vehicles/makes`, `/vehicles/models`, `/vehicles/options` | Car picker menus, from fueleconomy.gov | Done |
-| `GET /vehicles/{vehicle_id}` | Specs for one exact car | Done; no weight data yet |
-| `PUT /users/me/vehicle` | Select the driver's car with `{"vehicle_id": ...}` | Done (in memory) |
-| `GET /users/me/vehicle` | The selected car | Done (in memory) |
+| `PUT /users/me/vehicle` | Send the driver's car data from the EPA dataset; stored as-is | Done (in memory) |
+| `GET /users/me/vehicle` | The car data, exactly as sent | Done (in memory) |
 | `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done, using the $1-per-event placeholder pricing |
 | `POST /trips` | Upload a trip summary and detected events | Done (in memory), idempotent |
 | `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done; flat $1 per event until the cost model lands |
@@ -39,18 +37,13 @@ Not in the skeleton yet: `POST /trips/{id}/samples`, `POST /games` + `WS /ws/gam
 
 ## Vehicles
 
-The car picker walks fueleconomy.gov's menus: model year → make → model → option (engine and transmission). Each option is one exact car with its own `vehicle_id`, because MPG differs by engine and transmission.
+The app lets the driver pick their car from the EPA dataset and sends that car's data with `PUT /users/me/vehicle`. The body is a JSON object with any fields. The backend doesn't read or change them: it stores the object and passes it unchanged to the cost model with every trip uploaded afterwards. Field names are agreed between the app and the data teammate.
 
-1. `GET /vehicles/years` → `[2027, 2026, …]`
-2. `GET /vehicles/makes?year=2020` → `["Acura", …, "Honda", …]`
-3. `GET /vehicles/models?year=2020&make=Honda` → `["Accord", …, "Civic 4Dr", …]`
-4. `GET /vehicles/options?year=2020&make=Honda&model=Civic 4Dr` → `[{"vehicle_id": 42150, "description": "Auto (variable gear ratios), 4 cyl, 1.5 L, Turbo"}, …]`
-5. `PUT /users/me/vehicle` with `{"vehicle_id": 42150}` → the car's specs
+Example body: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json), built from a real row of the EPA Test Car List.
 
-- When a model has only one option, select it without asking the driver.
-- Specs include MPG (city, highway, combined; MPGe for electric and hydrogen cars), fuel type, powertrain (hybrid, EV, …), size class, engine, transmission, drive and EPA's annual fuel cost. **fueleconomy.gov has no weight data, so `weight_lb` is null for now.**
-- Each trip is priced with the car selected when it was uploaded, so changing cars later doesn't rewrite old receipts.
-- If fueleconomy.gov is unreachable, these endpoints return `502` with `vehicle_data_unavailable`.
+- The body must be a JSON object with 1 to 200 fields, under 20 KB.
+- Each trip is priced with the car data sent before it was uploaded, so changing cars later doesn't rewrite old receipts.
+- `GET /users/me/vehicle` returns the object exactly as sent, or `404` with `vehicle_not_set`.
 
 ## Trips
 
