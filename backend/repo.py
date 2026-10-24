@@ -427,8 +427,8 @@ async def leaderboard(user_id: UUID, period: Period) -> Leaderboard:
                 user_id=r["user_id"],
                 nickname=r["nickname"],
                 improvement_pct=_float(r["improvement_pct"], 1),
-                est_savings_usd=_float(r["est_savings_usd"], 2),
-                trips_this_week=r["trip_count"],
+                est_savings_usd=_float(r["est_savings_usd"], 2) or 0.0,
+                trips_counted=r["trip_count"],
                 state=r["state"],
             )
             for r in rows

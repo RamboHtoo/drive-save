@@ -201,6 +201,13 @@ def test_leaderboard_ranks_members_inside_the_callers_crew(client):
         ("casey", None, None),  # no baseline yet: listed last, unranked
         ("drew", None, None),
     ]
+    # The iOS app decodes est_savings_usd as a number, so unranked drivers get 0 rather than null.
+    assert [(s["state"], s["est_savings_usd"], s["trips_counted"]) for s in board["standings"]] == [
+        ("ready", 2.0, 1),
+        ("ready", 1.0, 1),
+        ("collecting_baseline", 0.0, 0),
+        ("collecting_baseline", 0.0, 0),
+    ]
 
 
 def test_leaderboard_needs_a_crew_and_turns_active_at_four(client):

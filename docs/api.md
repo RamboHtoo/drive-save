@@ -104,8 +104,8 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 - `join_code` is 6 characters (no 0/O or 1/I), case-insensitive, and only returned to members. Put `crew_id` and `join_code` in the QR code.
 - `GET /leaderboard` (no parameters) ranks the members of your crew. If you aren't in a crew it returns `404` with `not_in_crew`.
 - The baseline is a driver's first 3 priced trips of at least a mile. `improvement_pct` = (baseline − this week's waste per mile) ÷ baseline × 100, counting only this week's later trips (weeks start Monday 00:00 UTC). Ties share a rank.
-- Each standing has a `state`: `ready`, `collecting_baseline`, `zero_baseline` (the baseline had no harsh events) or `no_weekly_trips`. Drivers who aren't `ready` come last, with `rank`, `improvement_pct` and `est_savings_usd` set to null.
-- `trips_this_week` counts this week's trips after the baseline. `est_savings_usd` is signed: negative means the driver wasted more than their baseline.
+- Each standing has a `state`: `ready`, `collecting_baseline`, `zero_baseline` (the baseline had no harsh events) or `no_weekly_trips`. Drivers who aren't `ready` come last, with `rank` and `improvement_pct` set to null and `est_savings_usd` set to 0.
+- `trips_counted` counts this week's trips after the baseline. `est_savings_usd` is signed: negative means the driver wasted more than their baseline.
 - `is_demo: true` on the leaderboard means a demo crew. Always label it in the UI.
 
 ## Storage
