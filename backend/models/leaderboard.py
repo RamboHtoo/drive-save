@@ -9,12 +9,13 @@ class Period(str, Enum):
 
 
 class Standing(BaseModel):
-    rank: int | None = Field(description="1 = most improved; None until the driver has a complete baseline and a later trip")
+    rank: int | None = Field(description="1 = most improved (ties share a rank); None while unranked")
     user_id: UUID
     nickname: str
-    improvement_pct: float | None = Field(description="(baseline - later waste per mile) / baseline x 100; None while unranked")
-    est_savings_usd: float
-    trips_counted: int
+    improvement_pct: float | None = Field(description="(baseline - this week's waste per mile) / baseline x 100; None while unranked")
+    est_savings_usd: float | None = Field(description="Signed estimate for this week's trips; None while unranked")
+    trips_this_week: int = Field(description="Trips this week after the baseline")
+    state: str = Field(description="ready, collecting_baseline, zero_baseline or no_weekly_trips")
 
 
 class Leaderboard(BaseModel):

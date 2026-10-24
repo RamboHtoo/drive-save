@@ -74,7 +74,7 @@ nano backend/.env
 | --- | --- |
 | `API_DOMAIN` | The hostname from step 3, for example `api.example.com` |
 | `ADMIN_KEY` | The random value you just generated |
-| `DATABASE_URL` | The Tiger Data connection string (leave the placeholder until stage 2) |
+| `DATABASE_URL` | The Tiger Data connection string for the `drivesave_app` role (see "Connect Tiger Data" below). **Required**: the API won't start without it |
 | `CORS_ORIGINS` | `*` |
 
 `backend/.env` holds secrets. It is git-ignored; never commit it or paste it into chat.
@@ -91,10 +91,21 @@ docker compose up -d --build
 ```bash
 docker compose ps                                  # api should say "healthy"
 docker compose logs caddy | grep -i certificate    # look for "certificate obtained successfully"
-curl https://api.example.com/health                # {"status":"ok","version":"0.1.0"}
+curl https://api.example.com/health                # {"status":"ok", ..., "database":"ok","schema_version":1}
 ```
 
 Then open `https://api.example.com/health` on a phone **using cellular data, not Wi-Fi**, and `https://api.example.com/docs` in a browser.
+
+## Connect Tiger Data (once)
+
+The data teammate creates the Tiger Cloud service. In its SQL editor, connected as `tsdbadmin`, run these files from the repo in order:
+
+1. [`analytics/schema.sql`](../analytics/schema.sql): tables, hypertables and the daily continuous aggregate. Skip it if `SELECT * FROM schema_versions;` already shows version 1.
+2. [`analytics/queries.sql`](../analytics/queries.sql): the analytics functions the API calls (`drive_save_members`, `drive_save_baseline`, `drive_save_progress`).
+3. [`backend/db/002_event_details.sql`](../backend/db/002_event_details.sql): two event columns the cost model needs.
+4. [`backend/db/app_role.sql`](../backend/db/app_role.sql), after replacing `CHANGE_ME` with a password from `openssl rand -hex 24`. It creates `drivesave_app`, which can read and write app data but can't change the schema.
+
+Then set `DATABASE_URL` in `backend/.env` on the server to the service's connection string with `drivesave_app` and its password, for example `postgres://drivesave_app:<password>@<host>:<port>/tsdb?sslmode=require`, and restart: `docker compose up -d`. Keep the password out of Git, Notion and chat.
 
 ## 9. Share the URL
 
@@ -107,7 +118,7 @@ cd ~/drive-save && git pull
 cd backend && docker compose up -d --build
 ```
 
-Until Tiger Data is connected, data lives in memory: **every restart or redeploy deletes all users, crews and trips.** Re-run the demo setup afterwards.
+Data lives in Tiger Data, so restarts and redeploys keep users, crews and trips.
 
 ## Useful commands
 
@@ -129,7 +140,7 @@ Run these from `drive-save/backend`.
 | Certificate errors mentioning rate limits | Too many attempts for this hostname. Switch from `sslip.io` to a real domain, or wait |
 | `502 Bad Gateway` | The API container is down. Run `docker compose logs api` |
 | The iPhone can't connect | Use the `https://` hostname, not the raw IP. Test on cellular data to rule out venue Wi-Fi |
-| Users and crews disappeared | Expected after a restart until Tiger Data is connected |
+| `/health` says `"database":"unavailable"`, or the API container keeps restarting | `DATABASE_URL` is missing or wrong, or the database rejects the role. Run `docker compose logs api` |
 
 ## Test the stack on your laptop
 

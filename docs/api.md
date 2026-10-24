@@ -16,21 +16,21 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 
 ## Endpoints
 
-"Skeleton status" says what works today. Placeholder means the response has the final shape but uses fixed inputs until the real implementation lands.
+"Status" says what works today. Placeholder means the response has the final shape but uses fixed inputs until the real implementation lands.
 
-| Method and path | Purpose | Skeleton status |
+| Method and path | Purpose | Status |
 | --- | --- | --- |
 | `GET /health` | Deployment check (no auth) | Done |
-| `POST /users` | Create a user; returns `user_id` and `token` (no auth) | Done (in memory) |
-| `PUT /users/me/vehicle` | Send the driver's car data from the EPA dataset; stored as-is | Done (in memory) |
-| `GET /users/me/vehicle` | The car data, exactly as sent | Done (in memory) |
+| `POST /users` | Create a user; returns `user_id` and `token` (no auth) | Done |
+| `PUT /users/me/vehicle` | Send the driver's car data from the EPA dataset; stored as-is | Done |
+| `GET /users/me/vehicle` | The car data, exactly as sent | Done |
 | `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done, using the $1-per-event placeholder pricing |
-| `POST /trips` | Upload a trip summary, detected events and GPS speed readings | Done (in memory), idempotent |
+| `POST /trips` | Upload a trip summary, detected events and GPS speed readings | Done, idempotent |
 | `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done; flat $1 per event until the cost model lands |
 | `GET /trips/{trip_id}/cost-input` | Exactly what the cost model receives for a trip (owner only) | Done |
-| `POST /crews` | Create a crew; the creator joins automatically | Done (in memory) |
-| `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done (in memory) |
-| `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done (in memory) |
+| `POST /crews` | Create a crew; the creator joins automatically | Done |
+| `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done |
+| `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done |
 | `GET /leaderboard` | The members of your crew, ranked against each other | Done |
 
 Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/demo/reset`.
@@ -103,10 +103,13 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 - The competition counts once the crew has 4 or more members (`active: true`).
 - `join_code` is 6 characters (no 0/O or 1/I), case-insensitive, and only returned to members. Put `crew_id` and `join_code` in the QR code.
 - `GET /leaderboard` (no parameters) ranks the members of your crew. If you aren't in a crew it returns `404` with `not_in_crew`.
-- `improvement_pct` = (baseline − later trips' waste per mile) ÷ baseline × 100. The baseline is a driver's first 3 trips. Drivers without a complete baseline or a later trip come last, with `rank: null` and `improvement_pct: null`.
+- The baseline is a driver's first 3 priced trips of at least a mile. `improvement_pct` = (baseline − this week's waste per mile) ÷ baseline × 100, counting only this week's later trips (weeks start Monday 00:00 UTC). Ties share a rank.
+- Each standing has a `state`: `ready`, `collecting_baseline`, `zero_baseline` (the baseline had no harsh events) or `no_weekly_trips`. Drivers who aren't `ready` come last, with `rank`, `improvement_pct` and `est_savings_usd` set to null.
+- `trips_this_week` counts this week's trips after the baseline. `est_savings_usd` is signed: negative means the driver wasted more than their baseline.
 - `is_demo: true` on the leaderboard means a demo crew. Always label it in the UI.
 
-## Notes for the skeleton
+## Storage
 
-- Data lives in memory: **restarting the server deletes all users, crews and trips.** Call `POST /users` again after a restart.
+- Everything is stored in Tiger Data (Postgres + TimescaleDB), so restarts and redeploys keep users, crews and trips.
+- Each trip is priced once, when it's uploaded, and the result is saved with it. `GET /trips/{trip_id}/receipt` returns `409` with `trip_not_scored` if the cost model couldn't price the trip.
 - Every harsh event costs a flat $1 until the real cost model lands, so progress and leaderboard amounts are placeholders too.

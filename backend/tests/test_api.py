@@ -1,14 +1,18 @@
-"""Contract tests: every endpoint answers with the agreed shapes and error format."""
+"""Contract tests: every endpoint answers with the agreed shapes and error format.
+
+They run against a real TimescaleDB with the shared schema (see conftest.py).
+"""
 
 import copy
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import store
+from conftest import query
 from main import app
 from services import cost_model
 
@@ -17,16 +21,10 @@ SAMPLE_TRIP = json.loads((FIXTURES / "sample-trip.json").read_text())
 SAMPLE_VEHICLE = json.loads((FIXTURES / "sample-vehicle.json").read_text())
 
 
-@pytest.fixture(autouse=True)
-def clean_store():
-    store.reset()
-    yield
-    store.reset()
-
-
 @pytest.fixture
 def client():
-    return TestClient(app)
+    with TestClient(app) as c:  # runs the app's startup, which connects to the database
+        yield c
 
 
 @pytest.fixture
@@ -51,13 +49,28 @@ def new_user(client, nickname="alex"):
 
 
 def fresh_trip(events=None):
-    """The sample trip as a new trip: new client_trip_id and event ids, optionally fewer events."""
+    """The sample trip as a new trip that ended a minute ago (weekly standings only count this week).
+
+    New client_trip_id and event ids; optionally fewer events.
+    """
     trip = copy.deepcopy(SAMPLE_TRIP)
     trip["client_trip_id"] = str(uuid.uuid4())
     for event in trip["events"]:
         event["event_id"] = str(uuid.uuid4())
     if events is not None:
         trip["events"] = trip["events"][:events]
+
+    def parse(ts):
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+    shift = datetime.now(timezone.utc) - timedelta(minutes=1) - parse(trip["ended_at"])
+
+    def move(ts):
+        return (parse(ts) + shift).isoformat().replace("+00:00", "Z")
+
+    trip["started_at"], trip["ended_at"] = move(trip["started_at"]), move(trip["ended_at"])
+    for item in trip["events"] + trip["speed_samples"]:
+        item["ts"] = move(item["ts"])
     return trip
 
 
@@ -65,10 +78,12 @@ def upload(client, headers, trip=None):
     return client.post("/trips", json=trip or SAMPLE_TRIP, headers=headers)
 
 
-def test_health(client):
+def test_health_reports_the_database(client):
     res = client.get("/health")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+    assert res.json()["database"] == "ok"
+    assert res.json()["schema_version"] == 1
 
 
 def test_missing_token_uses_error_format(client):
@@ -201,12 +216,10 @@ def test_leaderboard_needs_a_crew_and_turns_active_at_four(client):
 
 def test_progress_sets_baseline_after_three_trips(client):
     user_id, headers = new_user(client)
-    for i in range(4):
-        trip = copy.deepcopy(SAMPLE_TRIP)
-        trip["client_trip_id"] = f"6f1c2a9e-4b7d-4c1e-9a3f-2d8e5b7c1a4{i}"
-        if i == 3:
-            trip["events"] = trip["events"][:1]  # a smoother fourth trip
-        upload(client, headers, trip)
+    for _ in range(3):
+        upload(client, headers, fresh_trip())
+    assert client.get(f"/users/{user_id}/progress", headers=headers).json()["improvement_pct"] is None  # no later trip yet
+    upload(client, headers, fresh_trip(events=1))  # a smoother fourth trip
 
     progress = client.get(f"/users/{user_id}/progress", headers=headers).json()
     assert progress["trips_counted"] == 4
@@ -214,6 +227,33 @@ def test_progress_sets_baseline_after_three_trips(client):
     # Baseline: 9 events over 19.2 mi. Fourth trip: 1 event over 6.4 mi, where the baseline rate predicts 3.
     assert progress["improvement_pct"] == 66.7
     assert progress["est_savings_usd"] == 2.0
+    assert progress["weekly"][-1]["miles"] == 25.6
+
+
+def test_uploads_follow_the_database_rules(client):
+    user_id, headers = new_user(client)
+    short = fresh_trip()
+    short["distance_mi"] = 0.5  # under a mile: priced, but never a baseline trip
+    upload(client, headers, short)
+    for _ in range(3):
+        upload(client, headers, fresh_trip())
+    upload(client, headers, fresh_trip(events=1))
+
+    trips = query("SELECT status, baseline_slot, distance_mi FROM trips WHERE user_id = $1 ORDER BY accepted_seq", uuid.UUID(user_id))
+    assert [(t["status"], t["baseline_slot"]) for t in trips] == [("scored", None), ("scored", 1), ("scored", 2), ("scored", 3), ("scored", None)]
+    assert query("SELECT count(*) AS n FROM trip_metrics WHERE user_id = $1", uuid.UUID(user_id))[0]["n"] == 5
+    assert query("SELECT count(*) AS n FROM speed_samples")[0]["n"] == 5 * len(SAMPLE_TRIP["speed_samples"])
+    # Signed savings against the frozen baseline: the short trip came first, so only the last trip counts.
+    ledger = query("SELECT amount_usd FROM savings_ledger WHERE user_id = $1", uuid.UUID(user_id))
+    assert [float(r["amount_usd"]) for r in ledger] == [2.0]
+
+
+def test_data_survives_a_server_restart():
+    with TestClient(app) as before:
+        _, headers = new_user(before)
+        trip_id = upload(before, headers).json()["trip_id"]
+    with TestClient(app) as after:  # the app shut down and started again; same database
+        assert after.get(f"/trips/{trip_id}/receipt", headers=headers).json()["avoidable_cost_usd"] == 3.0
 
 
 def test_driver_sends_their_car_and_gets_it_back_unchanged(client):

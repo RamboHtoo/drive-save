@@ -4,7 +4,7 @@ import os
 
 APP_VERSION = "0.1.0"
 
-# Tiger Data (Postgres + Timescale) connection string. Unused until stage 2.
+# Tiger Data (Postgres + Timescale) connection string. Required: the app won't start without it.
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Protects admin-only endpoints such as the demo reset.

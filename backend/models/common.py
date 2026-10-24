@@ -20,3 +20,5 @@ class ErrorResponse(BaseModel):
 class Health(BaseModel):
     status: str
     version: str
+    database: str
+    schema_version: int | None

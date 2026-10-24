@@ -92,7 +92,10 @@ class TripCreate(StrictModel):
             raise ValueError("sample_seq values must be unique within the trip")
         if self.events and all(s.speed_mps is None for s in self.speed_samples):
             raise ValueError("speed_samples are required when the trip has events")
-        self.speed_samples.sort(key=lambda s: (s.ts, s.sample_seq))  # canonical order
+        # Canonical form, matching what the database stores, so identical retries compare equal.
+        self.distance_mi = round(self.distance_mi, 6)
+        self.events.sort(key=lambda e: (e.ts, e.event_id))
+        self.speed_samples.sort(key=lambda s: (s.ts, s.sample_seq))
         return self
 
 

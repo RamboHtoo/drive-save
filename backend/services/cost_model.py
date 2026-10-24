@@ -10,15 +10,19 @@ function here) and keeps the signature CostModelInput -> CostModelOutput.
 """
 
 from bisect import bisect_left, bisect_right
+from dataclasses import dataclass
 from datetime import date, timedelta
+from uuid import UUID
 
-import store
-from errors import ApiError
+from pydantic import JsonValue
+
 from models.cost_model import CostModelInput, CostModelOutput, EventInput, TripInput
-from models.trips import Assumption, Receipt, ReceiptEvent
+from models.trips import Assumption, TripCreate
 
 COST_MODEL = "flat_per_event"
 COST_PER_EVENT_USD = 1.00
+# The database needs fuel used for every scored trip; until the real model lands, assume 25 mpg.
+PLACEHOLDER_MPG = 25.0
 _PLACEHOLDER_SET_ON = date(2026, 10, 24)
 
 # EIA weekly US average retail price, regular gasoline. Update when EIA publishes a new week.
@@ -35,8 +39,15 @@ _MPS_PER_MPH = 0.44704
 _STANDARD_GRAVITY = 9.80665  # m/s^2
 
 
-def build_input(record: store.TripRecord) -> CostModelInput:
-    trip = record.trip
+@dataclass
+class PricingRequest:
+    trip_id: UUID
+    trip: TripCreate
+    vehicle: dict[str, JsonValue] | None  # as the app sent it, when the trip was uploaded
+
+
+def build_input(request: PricingRequest) -> CostModelInput:
+    trip = request.trip
     samples = trip.speed_samples  # sorted by time during validation
     times = [s.ts for s in samples]
     events = []
@@ -66,7 +77,7 @@ def build_input(record: store.TripRecord) -> CostModelInput:
         )
     return CostModelInput(
         trip=TripInput(
-            trip_id=record.trip_id,
+            trip_id=request.trip_id,
             started_at=trip.started_at,
             ended_at=trip.ended_at,
             duration_s=(trip.ended_at - trip.started_at).total_seconds(),
@@ -74,51 +85,20 @@ def build_input(record: store.TripRecord) -> CostModelInput:
             avg_speed_mph=trip.avg_speed_mph,
             speed_samples=samples,
         ),
-        vehicle=record.vehicle,
+        vehicle=request.vehicle,
         fuel_price=US_AVERAGE_FUEL_PRICE,
         events=events,
     )
 
 
 def estimate(inputs: CostModelInput) -> CostModelOutput:
-    """The cost model. Placeholder: every harsh event costs $1, whatever the inputs say."""
+    """The cost model. Placeholder: every harsh event costs $1, and the car is assumed to get 25 mpg."""
     return CostModelOutput(
         model_name=COST_MODEL,
         event_costs_usd=[COST_PER_EVENT_USD] * len(inputs.events),
+        fuel_gal=round(inputs.trip.distance_mi / PLACEHOLDER_MPG, 6),
         assumptions=[
-            Assumption(
-                key="cost_per_event",
-                value=COST_PER_EVENT_USD,
-                unit="USD/event",
-                source_url=None,
-                as_of=_PLACEHOLDER_SET_ON,
-                is_estimate=True,
-            ),
+            Assumption(key="cost_per_event", value=COST_PER_EVENT_USD, unit="USD/event", source_url=None, as_of=_PLACEHOLDER_SET_ON, is_estimate=True),
+            Assumption(key="placeholder_mpg", value=PLACEHOLDER_MPG, unit="mi/gal", source_url=None, as_of=_PLACEHOLDER_SET_ON, is_estimate=True),
         ],
-    )
-
-
-def price_trip(record: store.TripRecord) -> Receipt:
-    inputs = build_input(record)
-    result = estimate(inputs)
-    if len(result.event_costs_usd) != len(inputs.events):
-        raise ApiError(500, "cost_model_error", "The cost model must return one cost per event")
-    events = [
-        ReceiptEvent(
-            type=e.type,
-            ts=e.ts,
-            speed_before_mph=e.speed_before_mph,
-            speed_after_mph=e.speed_after_mph,
-            cost_usd=round(cost, 2),
-        )
-        for e, cost in zip(inputs.events, result.event_costs_usd)
-    ]
-    return Receipt(
-        trip_id=record.trip_id,
-        distance_mi=inputs.trip.distance_mi,
-        events=events,
-        avoidable_cost_usd=round(sum(result.event_costs_usd), 2),
-        cost_model=result.model_name,
-        assumptions=result.assumptions,
-        is_demo=record.trip.is_demo,
     )

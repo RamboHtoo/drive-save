@@ -1,6 +1,6 @@
 # Cost model contract
 
-The cost model turns a trip's harsh events into dollars. The backend gathers the inputs, calls the model for every receipt, and turns the output into the receipt the app shows. The analytics teammate owns the model; until it lands, a placeholder charges a flat $1 per event.
+The cost model turns a trip's harsh events into dollars. The backend gathers the inputs, calls the model once when a trip is uploaded, and stores the result in Tiger Data; the receipt the app shows is read from there. The analytics teammate owns the model; until it lands, a placeholder charges a flat $1 per event and assumes 25 mpg to fill in fuel used.
 
 ## Where it plugs in
 
@@ -69,7 +69,7 @@ The car's data exactly as the app sent it with `PUT /users/me/vehicle`, as of wh
 | --- | --- | --- |
 | `model_name` | string | Shown on the receipt as `cost_model` |
 | `event_costs_usd` | list of numbers | Exactly one per input event, in the same order. The backend rejects anything else |
-| `fuel_gal` | number or null | Fuel the whole trip used. The database (`trips.fuel_gal`) requires it for scored trips, so return it |
+| `fuel_gal` | number or null | Fuel the whole trip used. The database (`trips.fuel_gal`) requires it for scored trips. Return null only when the trip can't be priced: it's then stored as `insufficient_data`, without costs |
 | `assumptions` | list | Every constant or data source used: `key`, `value`, `unit`, `source_url`, `as_of`, `is_estimate`. The receipt shows these to the user |
 
 ## Data still to add
@@ -82,4 +82,4 @@ The car's data exactly as the app sent it with `PUT /users/me/vehicle`, as of wh
 
 Vehicle weight and road-load coefficients come in the EPA vehicle data the app sends.
 
-**For the database schema:** `trip_events` in `analytics/schema.sql` has no columns for `duration_s` or `heading_change_deg`, so those would be lost once trips are stored there. Add them before the backend moves to Tiger Data.
+`duration_s` and `heading_change_deg` are stored in two `trip_events` columns added by [`backend/db/002_event_details.sql`](../backend/db/002_event_details.sql), since `analytics/schema.sql` v1 doesn't have them.
