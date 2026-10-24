@@ -20,6 +20,10 @@ class VehicleData(RootModel[dict[str, JsonValue]]):
             raise ValueError("vehicle data needs at least one field")
         if len(self.root) > MAX_FIELDS:
             raise ValueError(f"vehicle data can have at most {MAX_FIELDS} fields")
-        if len(json.dumps(self.root)) > MAX_BYTES:
+        try:
+            encoded = json.dumps(self.root, allow_nan=False)
+        except ValueError:
+            raise ValueError("vehicle data can't contain NaN or infinity") from None
+        if len(encoded) > MAX_BYTES:
             raise ValueError(f"vehicle data must be under {MAX_BYTES} bytes")
         return self

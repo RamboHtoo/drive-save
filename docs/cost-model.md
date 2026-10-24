@@ -28,14 +28,19 @@ Replace its body, or import your function there, and keep the signature. The sch
 | `duration_s` | s | Derived: `ended_at` − `started_at` |
 | `distance_mi` | mi | Phone |
 | `avg_speed_mph` | mph | Phone |
+| `speed_samples` | see below | Phone | Every GPS speed reading the phone sent, in time order |
+
+Each speed sample is `{"ts": "2026-10-24T20:07:02Z", "sample_seq": 0, "speed_mps": 15.423, "speed_accuracy_mps": 0.5}`: absolute UTC time, m/s, and the reading's accuracy in m/s. Invalid readings arrive with `speed_mps` and/or `speed_accuracy_mps` set to null.
 
 ### `events[]`, in trip order
 
 | Field | Unit | Source | Notes |
 | --- | --- | --- | --- |
 | `index` | | Backend | Position in the trip; costs must come back in the same order |
+| `event_id` | | Phone | Stable UUID for the event |
 | `type` | | Phone | `harsh_brake`, `rapid_accel` or `sharp_turn` |
-| `ts` | UTC | Phone | |
+| `ts` | UTC | Phone | When the event started |
+| `detector_version` | | Phone | Version of the phone's event detector |
 | `speed_before_mph`, `speed_after_mph` | mph | Phone (GPS) | |
 | `speed_change_mph` | mph | Derived | After − before; negative while slowing |
 | `avg_speed_mph` | mph | Derived | Mean of before and after: the speed during the event |
@@ -43,10 +48,14 @@ Replace its body, or import your function there, and keep the signature. The sch
 | `peak_g` | g | Phone | Forward/backward for brake and accel, sideways for turns |
 | `mean_accel_g` | g | Derived | Speed change ÷ duration; negative while slowing; null without `duration_s` |
 | `heading_change_deg` | degrees | Phone | How far the car turned; `sharp_turn` only; optional |
-| `speed_trace` | s, mph | Phone | Required. Speeds around the event, oldest first, about 1 per second from 10 s before to 10 s after: `[{"t_s": -10, "speed_mph": 34.5}, …]`. `t_s` is seconds from `ts`, negative = before |
-| `lat`, `lng` | degrees | Phone | Optional |
+| `speed_samples` | m/s | Phone | The trip's readings from 10 s before to 10 s after `ts`, same shape as above |
+| `speed_window_complete` | | Derived | True when there are valid readings both before and after the event. False means the phone left a gap; the event is kept, so decide how to price it |
 
-Optional fields can be null, so the model needs a fallback for each.
+Optional fields can be null, so the model needs a fallback for each. The backend doesn't store location, so there are no coordinates.
+
+### `fuel_price`
+
+The US average retail price of regular gasoline, from the EIA weekly series, in the same shape as an assumption: `{"key": "fuel_price", "value": 4.284, "unit": "USD/gal", "source_url": "https://www.eia.gov/…", "as_of": "2026-10-19"}`. Copy it into your `assumptions` so the receipt shows the price used.
 
 ### `vehicle`
 
@@ -60,15 +69,17 @@ The car's data exactly as the app sent it with `PUT /users/me/vehicle`, as of wh
 | --- | --- | --- |
 | `model_name` | string | Shown on the receipt as `cost_model` |
 | `event_costs_usd` | list of numbers | Exactly one per input event, in the same order. The backend rejects anything else |
+| `fuel_gal` | number or null | Fuel the whole trip used. The database (`trips.fuel_gal`) requires it for scored trips, so return it |
 | `assumptions` | list | Every constant or data source used: `key`, `value`, `unit`, `source_url`, `as_of`, `is_estimate`. The receipt shows these to the user |
 
 ## Data still to add
 
 | Data | Status | Notes |
 | --- | --- | --- |
-| Fuel price ($/gal) and electricity price ($/kWh) | Planned: the data teammate provides them | The backend adds them to the input once the format is agreed |
-| Trip location | Open | Picks the regional price; trips without events have no coordinates today |
+| Electricity price ($/kWh) for electric cars | Open | Fuel price is the US average today; electric cars need an electricity price too |
 | Elevation change | Open, optional | Speeding up uphill takes extra energy; braking downhill is often unavoidable. The phone can measure it with GPS altitude or the barometer |
-| Idle time, stop count, time at high speed, event confidence, temperature, load | Open, could | Each shifts efficiency a little |
+| Idle time, stop count, time at high speed, temperature, load | Open, could | Each shifts efficiency a little. Idle time and high-speed time can be computed from `speed_samples` when the phone sends the whole trip |
 
 Vehicle weight and road-load coefficients come in the EPA vehicle data the app sends.
+
+**For the database schema:** `trip_events` in `analytics/schema.sql` has no columns for `duration_s` or `heading_change_deg`, so those would be lost once trips are stored there. Add them before the backend moves to Tiger Data.

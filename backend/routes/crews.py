@@ -35,6 +35,14 @@ def _crew_out(crew: store.CrewRecord, viewer_id: UUID) -> Crew:
     )
 
 
+def _join(crew: store.CrewRecord, user_id: UUID) -> None:
+    """A driver belongs to one crew at a time: joining moves them out of any other crew."""
+    for other in store.crews.values():
+        if other is not crew:
+            other.members.pop(user_id, None)
+    crew.members.setdefault(user_id, datetime.now(timezone.utc))  # joining twice is a no-op
+
+
 def _get_crew(crew_id: UUID) -> store.CrewRecord:
     crew = store.crews.get(crew_id)
     if crew is None:
@@ -45,8 +53,8 @@ def _get_crew(crew_id: UUID) -> store.CrewRecord:
 @router.post("/crews", response_model=Crew, status_code=status.HTTP_201_CREATED)
 async def create_crew(body: CrewCreate, user: store.UserRecord = Depends(get_current_user)) -> Crew:
     crew = store.CrewRecord(crew_id=uuid4(), name=body.name, join_code=_new_join_code())
-    crew.members[user.user_id] = datetime.now(timezone.utc)  # the creator joins automatically
     store.crews[crew.crew_id] = crew
+    _join(crew, user.user_id)  # the creator joins automatically
     return _crew_out(crew, user.user_id)
 
 
@@ -55,7 +63,7 @@ async def join_crew(crew_id: UUID, body: CrewJoin, user: store.UserRecord = Depe
     crew = _get_crew(crew_id)
     if body.join_code.strip().upper() != crew.join_code:
         raise ApiError(403, "wrong_join_code", "That join code does not match this crew")
-    crew.members.setdefault(user.user_id, datetime.now(timezone.utc))  # joining twice is a no-op
+    _join(crew, user.user_id)
     return _crew_out(crew, user.user_id)
 
 

@@ -239,8 +239,8 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_in
     def as_sent(field, value):
         if field == "ts":
             return value.isoformat().replace("+00:00", "Z")
-        if field == "speed_trace":
-            return [sample.model_dump() for sample in value]
+        if field == "event_id":
+            return str(value)
         return value
 
     for index, (sent, received) in enumerate(zip(SAMPLE_TRIP["events"], inputs.events)):
@@ -255,31 +255,85 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_in
     assert accel.mean_accel_g > 0
     assert turn.avg_speed_mph == 21.0
     assert turn.heading_change_deg == 85.0
-    # The speed trace around each event: 10 s before to 10 s after.
-    assert [(s.t_s, s.speed_mph) for s in brake.speed_trace[9:14]] == [(-1, 34.0), (0, 34.0), (1, 26.0), (2, 19.0), (3, 12.0)]
-    assert all(len(e.speed_trace) == 21 for e in inputs.events)
+    # GPS speed readings: all of them for the trip, and 10 s before to 10 s after each event.
+    assert len(inputs.trip.speed_samples) == len(SAMPLE_TRIP["speed_samples"])
+    assert [s.sample_seq for s in brake.speed_samples] == list(range(21))
+    assert [s.speed_mps for s in brake.speed_samples[9:14]] == [15.199, 15.199, 11.623, 8.494, 5.364]
+    invalid = next(s for s in accel.speed_samples if s.sample_seq == 41)
+    assert (invalid.speed_mps, invalid.speed_accuracy_mps) == (None, None)  # iOS sends -1 for an invalid reading
+    assert all(e.speed_window_complete for e in inputs.events)
+    # Fuel price: the US average.
+    assert (inputs.fuel_price.key, inputs.fuel_price.value, inputs.fuel_price.unit) == ("fuel_price", 4.284, "USD/gal")
 
 
 @pytest.mark.parametrize(
-    "trace",
+    "break_trip",
     [
-        None,  # missing
-        [{"t_s": 1, "speed_mph": 20}, {"t_s": 2, "speed_mph": 21}],  # nothing from before the event
-        [{"t_s": -2, "speed_mph": 20}, {"t_s": -1, "speed_mph": 21}],  # nothing from after the event
-        [{"t_s": 1, "speed_mph": 20}, {"t_s": -1, "speed_mph": 21}],  # times out of order
-        [{"t_s": -1, "speed_mph": 20}],  # a single sample
+        pytest.param(lambda t: t.update(speed_samples=[]), id="events-without-speed-samples"),
+        pytest.param(lambda t: t["speed_samples"][0].update(ts="2026-10-24T19:00:00Z"), id="sample-outside-trip"),
+        pytest.param(lambda t: t["speed_samples"][1].update(sample_seq=0), id="duplicate-sample-seq"),
+        pytest.param(lambda t: t["events"][1].update(event_id=t["events"][0]["event_id"]), id="duplicate-event-id"),
+        pytest.param(lambda t: t["events"][0].pop("detector_version"), id="missing-detector-version"),
+        pytest.param(lambda t: t.update(source="replayed"), id="replay-not-marked-demo"),
     ],
 )
-def test_speed_trace_is_required_and_must_surround_the_event(client, trace):
+def test_invalid_trip_uploads_are_rejected(client, break_trip):
     _, headers = new_user(client)
     trip = copy.deepcopy(SAMPLE_TRIP)
-    if trace is None:
-        del trip["events"][0]["speed_trace"]
-    else:
-        trip["events"][0]["speed_trace"] = trace
+    break_trip(trip)
     res = upload(client, headers, trip)
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "validation_error"
+
+
+def test_nan_and_infinity_are_rejected(client):
+    _, headers = new_user(client)
+    json_headers = {**headers, "content-type": "application/json"}
+    trip = json.dumps(SAMPLE_TRIP).replace('"distance_mi": 6.4', '"distance_mi": NaN')
+    assert client.post("/trips", content=trip, headers=json_headers).status_code == 422
+    car = '{"make": "HONDA", "equivalent_test_weight_lb": Infinity}'
+    assert client.put("/users/me/vehicle", content=car, headers=json_headers).status_code == 422
+
+
+def test_event_without_speeds_around_it_is_flagged_not_rejected(client, model_inputs):
+    _, headers = new_user(client)
+    trip = copy.deepcopy(SAMPLE_TRIP)
+    trip["speed_samples"] = [s for s in trip["speed_samples"] if s["sample_seq"] >= 10]  # nothing before the brake
+    res = upload(client, headers, trip)
+    assert res.status_code == 201
+    client.get(res.json()["receipt_url"], headers=headers)
+
+    brake, accel, turn = model_inputs[-1].events
+    assert brake.speed_window_complete is False
+    assert accel.speed_window_complete and turn.speed_window_complete
+
+
+def test_changed_trip_under_same_client_trip_id_conflicts(client):
+    _, headers = new_user(client)
+    upload(client, headers)
+
+    changed = copy.deepcopy(SAMPLE_TRIP)
+    changed["distance_mi"] = 7.0
+    res = upload(client, headers, changed)
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] == "trip_conflict"
+
+    # The same trip written differently (other sample order, other time zone notation) is still a retry.
+    same = copy.deepcopy(SAMPLE_TRIP)
+    same["speed_samples"].reverse()
+    same["started_at"] = "2026-10-24T16:01:00-04:00"
+    assert upload(client, headers, same).status_code == 200
+
+
+def test_driver_belongs_to_one_crew_at_a_time(client):
+    _, alex = new_user(client, "alex")
+    first = client.post("/crews", json={"name": "First"}, headers=alex).json()
+    _, sam = new_user(client, "sam")
+    second = client.post("/crews", json={"name": "Second"}, headers=sam).json()
+
+    moved = client.post(f"/crews/{second['crew_id']}/join", json={"join_code": second["join_code"]}, headers=alex).json()
+    assert moved["member_count"] == 2
+    assert client.get(f"/crews/{first['crew_id']}", headers=alex).json()["member_count"] == 0
 
 
 def test_cost_model_input_without_car_or_optional_fields(client, model_inputs):

@@ -18,6 +18,9 @@ async def upload_trip(body: TripCreate, response: Response, user: store.UserReco
     key = (user.user_id, body.client_trip_id)
     existing = store.trip_ids_by_client_id.get(key)
     if existing:
+        # Validation normalizes the payload, so an identical retry compares equal.
+        if store.trips[existing].trip != body:
+            raise ApiError(409, "trip_conflict", "A different trip was already uploaded with this client_trip_id")
         # Same upload retried from the phone's offline queue: return the original trip.
         response.status_code = status.HTTP_200_OK
         return TripCreated(trip_id=existing, receipt_url=f"/trips/{existing}/receipt", duplicate=True)

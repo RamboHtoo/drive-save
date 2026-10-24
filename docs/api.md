@@ -25,7 +25,7 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | `PUT /users/me/vehicle` | Send the driver's car data from the EPA dataset; stored as-is | Done (in memory) |
 | `GET /users/me/vehicle` | The car data, exactly as sent | Done (in memory) |
 | `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done, using the $1-per-event placeholder pricing |
-| `POST /trips` | Upload a trip summary and detected events | Done (in memory), idempotent |
+| `POST /trips` | Upload a trip summary, detected events and GPS speed readings | Done (in memory), idempotent |
 | `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done; flat $1 per event until the cost model lands |
 | `GET /trips/{trip_id}/cost-input` | Exactly what the cost model receives for a trip (owner only) | Done |
 | `POST /crews` | Create a crew; the creator joins automatically | Done (in memory) |
@@ -33,7 +33,7 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done (in memory) |
 | `GET /leaderboard` | Rivalry standings | Done; includes two labeled demo crews |
 
-Not in the skeleton yet: `POST /trips/{id}/samples`, `POST /games` + `WS /ws/games/{code}`, `POST /admin/demo/reset`.
+Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/demo/reset`.
 
 ## Vehicles
 
@@ -47,26 +47,36 @@ Example body: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json),
 
 ## Trips
 
-`POST /trips` takes the trip summary and the events detected on the phone. The client never sends dollar amounts; the server prices every trip.
+`POST /trips` takes the trip summary, the events detected on the phone, and the phone's GPS speed readings. The client never sends dollar amounts; the server prices every trip.
 
 Example request: [`fixtures/sample-trip.json`](../fixtures/sample-trip.json).
 
 | Field | Type | Rules |
 | --- | --- | --- |
-| `client_trip_id` | UUID | Generated on the phone. Re-uploading the same id returns the original trip with `200` and `duplicate: true` |
+| `client_trip_id` | UUID | Generated on the phone once per trip. Re-uploading the identical trip returns the original with `200` and `duplicate: true`; a different trip under the same id returns `409` with `trip_conflict` |
 | `started_at`, `ended_at` | datetime | `ended_at` must be after `started_at` |
 | `distance_mi` | number | Greater than 0, at most 1000 |
 | `avg_speed_mph` | number | 0 to 120 |
+| `source` | string, optional | `recorded` (default), `replayed` or `synthetic`. Replayed and synthetic trips must set `is_demo: true` |
+| `is_demo` | boolean, optional | Default `false`. Demo trips are labeled wherever they show up |
 | `events[]` | list | Each event must fall inside the trip window; at most 10 events per minute |
+| `events[].event_id` | UUID | Generated on the phone, unique within the trip, unchanged when the trip is re-uploaded |
 | `events[].type` | string | `harsh_brake`, `rapid_accel` or `sharp_turn` |
+| `events[].ts` | datetime | When the event started |
+| `events[].detector_version` | string | Version of the phone's event detector, for example `ios-0.1.0` |
 | `events[].peak_g` | number | Peak acceleration in g, above 0 and at most 2.0: forward/backward for `harsh_brake` and `rapid_accel`, sideways for `sharp_turn` |
 | `events[].speed_before_mph`, `speed_after_mph` | number | 0 to 120 |
 | `events[].duration_s` | number, optional | How long the event lasted, in seconds (up to 60). The cost model uses it for mean acceleration |
 | `events[].heading_change_deg` | number, optional | How far the car turned, 0 to 360 degrees. Send it for `sharp_turn` |
-| `events[].speed_trace` | list, **required** | Speeds around the event, oldest first: `[{"t_s": -10, "speed_mph": 34.5}, …, {"t_s": 10, "speed_mph": 22.5}]`. `t_s` is seconds from the event's `ts` (negative = before). Needs at least one sample before and one after the event, in increasing time order; up to 241 samples within ±60 s |
-| `events[].lat`, `lng` | number, optional | Valid coordinates |
+| `speed_samples[]` | list | GPS speed readings, about one per second, in any order; up to 21,600. **Required when the trip has events** |
+| `speed_samples[].ts` | datetime | When the reading was taken (absolute UTC time); inside the trip window |
+| `speed_samples[].sample_seq` | integer | 0 or more, unique within the trip; a simple counter works |
+| `speed_samples[].speed_mps` | number or null | `CLLocation.speed` in m/s, sent as-is. Negative (invalid) or above 53.6448 (120 mph) is stored as null |
+| `speed_samples[].speed_accuracy_mps` | number or null | `CLLocation.speedAccuracy` in m/s, sent as-is. Negative (invalid) is stored as null |
 
-**Recording the speed trace:** keep the last 10 seconds of GPS speed (about one reading per second) in a rolling buffer. When an event is detected, attach that buffer, keep recording for 10 more seconds, and attach those readings too. The cost model uses the trace to compare each event with a smooth alternative.
+Every number must be finite: NaN and infinity are rejected. Don't send coordinates; the backend doesn't store location.
+
+**Speed readings around events:** send readings for the whole trip if you can; logging every location update is the simplest way. At minimum, every event needs valid readings within 10 s before and 10 s after it. The server hands those windows to the cost model. An event without them is still accepted, but flagged for the model (`speed_window_complete: false`).
 
 Response (`201`, or `200` for a duplicate):
 
@@ -88,6 +98,7 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 ## Crews and leaderboard
 
 - A crew is **active** once it has 4 or more members. Only active crews are ranked.
+- A driver belongs to one crew at a time. Creating or joining another crew moves them out of their current one.
 - `join_code` is 6 characters (no 0/O or 1/I), case-insensitive, and only returned to members. Put `crew_id` and `join_code` in the QR code.
 - `GET /leaderboard?scope=crews` ranks crews against each other. `GET /leaderboard?scope=members&crew_id=...` ranks the members of one crew (members only).
 - `improvement_pct` = (baseline − this week's waste per mile) ÷ baseline × 100. The baseline is a driver's first 3 trips.
