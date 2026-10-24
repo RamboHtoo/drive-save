@@ -50,17 +50,17 @@ struct TripRow: View {
     let trip: Trip
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: "car.side.fill").font(.title3).foregroundStyle(DS.mint)
+            Image(systemName: trip.isWalkingTest ? "figure.walk" : "car.side.fill").font(.title3).foregroundStyle(DS.mint)
                 .frame(width: 46, height: 46).background(DS.mint.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
             VStack(alignment: .leading, spacing: 5) {
-                Text(trip.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                Text(trip.displayTitle).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                 Text(trip.provenanceLabel).font(.system(size: 9, weight: .bold)).foregroundStyle(trip.source == .measured ? DS.mint : DS.secondary)
                 Text("\(trip.distanceLabel) · \(trip.durationLabel)").font(.caption).foregroundStyle(DS.secondary)
             }
             Spacer(minLength: 2)
             VStack(alignment: .trailing, spacing: 5) {
-                Text(trip.hasEstimate ? trip.avoidableCost.dollars : "Pending").font(.subheadline.bold()).foregroundStyle(DS.mint)
-                Text(trip.hasEstimate ? "avoidable" : "estimate").font(.caption2).foregroundStyle(DS.secondary)
+                Text(trip.isWalkingTest ? "GPS test" : trip.hasEstimate ? trip.avoidableCost.dollars : "Pending").font(.subheadline.bold()).foregroundStyle(DS.mint)
+                Text(trip.isWalkingTest ? "no fuel costs" : trip.hasEstimate ? "avoidable" : "estimate").font(.caption2).foregroundStyle(DS.secondary)
             }
             Image(systemName: "chevron.right").font(.caption2.bold()).foregroundStyle(DS.secondary)
         }.padding(.vertical, 8).contentShape(Rectangle()).accessibilityElement(children: .combine)
@@ -71,7 +71,10 @@ struct Screen<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 24) { content }.padding(20).padding(.bottom, 24) }
-            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 84).allowsHitTesting(false) }
+            // Reserve actual viewport space and clip before padding. A scroll-content inset alone
+            // still lets the floating iOS tab bar paint over controls while scrolling.
+            .clipped()
+            .padding(.bottom, 84)
             .background(DS.background).toolbarBackground(DS.background, for: .navigationBar)
     }
 }

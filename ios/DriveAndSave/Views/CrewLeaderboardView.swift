@@ -1,44 +1,89 @@
 import SwiftUI
 
 struct CrewLeaderboardView: View {
-    @EnvironmentObject private var model: AppViewModel
+    @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Screen {
-            if model.client.isMock { DemoNotice() }
-            VStack(alignment: .leading, spacing: 8) {
-                Eyebrow(text: "The weekly rivalry")
-                Text("Less waste.\nMore bragging rights.").font(.system(size: 34, weight: .bold, design: .rounded)).tracking(-0.8)
-                Text("A little friendly competition goes a long way.").foregroundStyle(DS.secondary)
-            }
-            Surface {
-                HStack { Image(systemName: "flag.checkered").foregroundStyle(DS.mint); Eyebrow(text: "This week's challenge") }
-                Text("Find your smooth.").font(.title2.bold())
-                Text("Reduce modeled excess fuel per mile by 15% against your crew’s previous week.").foregroundStyle(DS.secondary)
-                ProgressView(value: 1).tint(DS.mint).accessibilityLabel("Demo challenge target achieved")
-                HStack { Text("Nittany Cruisers · 21% reduction"); Spacer(); Image(systemName: "checkmark.seal.fill") }.font(.caption.bold()).foregroundStyle(DS.mint)
-                Text("Sample challenge result · no live competition").font(.caption).foregroundStyle(DS.secondary)
-            }
-            HStack { Text("Crew standings").font(.title2.bold()); Spacer(); Text("DEMO WEEK").font(.caption2.bold()).foregroundStyle(DS.secondary) }
-            VStack(spacing: 12) {
-                ForEach(Array(model.crews.enumerated()), id: \.element.id) { index, crew in
-                    Surface {
-                        HStack(spacing: 14) {
-                            Text(String(format: "%02d", index + 1)).font(.title3.monospacedDigit().bold()).foregroundStyle(DS.secondary)
-                            Image(systemName: crew.symbol).font(.title2).foregroundStyle(DS.mint).frame(width: 30)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(crew.name).font(.subheadline.bold())
-                                Text("\(crew.members) members\(crew.isYourCrew ? " · Your crew" : "")").font(.caption).foregroundStyle(DS.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Text("−\(crew.reductionPercent, specifier: "%.0f")%").font(.title3.bold()).foregroundStyle(DS.mint)
-                        }
-                    }.overlay(RoundedRectangle(cornerRadius: 24).stroke(crew.isYourCrew ? DS.mint.opacity(0.6) : .clear))
+            Eyebrow(text: "Your private league")
+            Text("Less waste.\nMore bragging rights.").font(.system(size: 34, weight: .bold, design: .rounded))
+            Text("Compete individually with drivers in your league. A league needs 4+ members for ranked standings.").foregroundStyle(DS.secondary)
+            HStack {
+                NavigationLink("Create League") { LeagueFormView(creating: true) }
+                NavigationLink("Join League") { LeagueFormView(creating: false) }
+            }.buttonStyle(.borderedProminent)
+            NavigationLink("API & Vehicle setup") { APISettingsView() }
+            if let league = backend.league {
+                Surface {
+                    Text(league.name).font(.title2.bold())
+                    if league.is_demo { DemoNotice() }
+                    Text("\(league.member_count) members · \(league.canRank ? "Ranked league" : "Unranked — needs 4+ members")").foregroundStyle(DS.mint)
+                    Text("League ID: \(league.crew_id.uuidString)").font(.caption).textSelection(.enabled)
+                    if let code = league.join_code {
+                        Text("Invite code: \(code)").font(.headline).textSelection(.enabled)
+                        ShareLink(item: "Join my Drive Save league. League ID: \(league.crew_id.uuidString) · Invite code: \(code)") { Label("Share invite", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("Refresh league & drivers") { Task { await backend.refreshLeague() } }.disabled(backend.isBusy)
                 }
+                if league.canRank {
+                    Text("Individual driver rankings").font(.title2.bold())
+                    if backend.standings.isEmpty { Text("No ranked driving data yet. Baselines need the first 3 eligible trips.").foregroundStyle(DS.secondary) }
+                    ForEach(backend.standings) { standing in
+                        Surface {
+                            HStack { Text(standing.rank.map { "#\($0)" } ?? "Unranked").font(.title2.bold()); Text(standing.nickname).font(.headline); Spacer(); Text(standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? "Awaiting baseline").foregroundStyle(DS.mint) }
+                            if backend.leaderboardIsDemo { DemoNotice() }
+                            Text("\(standing.est_savings_usd.dollars) server estimate · current pricing may be placeholder").font(.caption).foregroundStyle(DS.secondary)
+                        }
+                    }
+                } else {
+                    Surface {
+                        Eyebrow(text: "Members · not ranked")
+                        ForEach(league.members) { member in Text(member.nickname).font(.headline) }
+                    }
+                }
+            } else if !backend.isRemote {
+                Surface {
+                    DemoNotice()
+                    Text("Example individual standings").font(.headline)
+                    Text("Fictional 4-driver league · no server or competition data").font(.caption).foregroundStyle(DS.secondary)
+                    ForEach(Array([("Alex", 24), ("Sam", 21), ("Jordan", 17), ("Taylor", 12)].enumerated()), id: \.offset) { index, driver in
+                        HStack { Text("#\(index + 1)"); Text(driver.0); Spacer(); Text("\(driver.1)% improvement").foregroundStyle(DS.mint) }.font(.subheadline)
+                    }
+                }
+            } else {
+                Text("Create or join a private league to view individual driver standings.").foregroundStyle(DS.secondary)
             }
             Surface {
-                Label("A fairer kind of rivalry", systemImage: "person.3.sequence.fill").font(.headline)
-                Text("Crews have 4+ members. Rankings compare percentage improvement in modeled excess fuel per mile against each crew’s own baseline, rather than total miles driven. These standings are fictional.").font(.subheadline).foregroundStyle(DS.secondary)
+                Text("Walking Tests, demo replays, and synthetic trips are excluded from real competition. Each driver competes against other members of their private league.").font(.caption).foregroundStyle(DS.secondary)
             }
-        }.navigationTitle("Your crew").navigationBarTitleDisplayMode(.inline)
+            BackendStatusView()
+        }.navigationTitle("Leagues").navigationBarTitleDisplayMode(.inline)
+            .task { if backend.identity != nil { await backend.refreshLeague() } }
+    }
+}
+
+struct LeagueFormView: View {
+    let creating: Bool
+    @EnvironmentObject private var backend: BackendViewModel
+    @State private var name = ""
+    @State private var leagueID = ""
+    @State private var inviteCode = ""
+    var body: some View {
+        Screen {
+            Surface {
+                if creating {
+                    TextField("League name", text: $name).accessibilityIdentifier("leagueName")
+                    Text("You will join automatically. Four members are required for ranked play.").font(.caption).foregroundStyle(DS.secondary)
+                    Button("Create League") { Task { await backend.createLeague(name: name) } }.accessibilityIdentifier("createLeague")
+                } else {
+                    TextField("League UUID", text: $leagueID).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("leagueUUID")
+                    TextField("Invite code", text: $inviteCode).textInputAutocapitalization(.characters).autocorrectionDisabled().accessibilityIdentifier("leagueCode")
+                    Text("Enter both values from the shared invite. The API cannot look up a league using only its code. Joining moves you out of your previous league.").font(.caption).foregroundStyle(DS.secondary)
+                    Button("Join League") { Task { await backend.joinLeague(id: leagueID, code: inviteCode) } }.accessibilityIdentifier("joinLeague")
+                }
+            }.buttonStyle(.borderedProminent).disabled(backend.isBusy)
+            if let league = backend.league { Text("Current league: \(league.name)").font(.headline).foregroundStyle(DS.mint) }
+            NavigationLink("API registration") { APISettingsView() }
+            BackendStatusView()
+        }.navigationTitle(creating ? "Create League" : "Join League").navigationBarTitleDisplayMode(.inline)
     }
 }

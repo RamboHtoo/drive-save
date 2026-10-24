@@ -1,104 +1,83 @@
 # Drive Save — iOS
 
-Native SwiftUI iPhone app for HackPSU 2026, iOS 17+. No external dependencies. All implementation lives in `/ios`; backend and analytics folders are untouched.
+Native SwiftUI app, iOS 17+, dark navy/mint design. Work stays inside `/ios`.
 
-## Launch in Xcode
+## Run
 
-1. Open `DriveAndSave.xcodeproj` and select the **DriveAndSave** scheme.
-2. Choose an iPhone under **Simulators**, not a stale “mismatched platform” Recent entry.
-3. Press **⌘R**. For a physical iPhone, select your signing team in Signing & Capabilities; change the bundle identifier only if your provisioning requires it.
+Open `DriveAndSave.xcodeproj`, choose the **DriveAndSave** scheme and an iPhone under **Simulators**, then ⌘R. For a physical iPhone, choose your signing team/device. No external packages are required. Remote sign-in requires a signed app with generated Keychain entitlements; use normal Xcode Run, not CODE_SIGNING_ALLOWED=NO.
 
-Home, Crew, and History retain the navy/mint mock-data experience. Start Trip opens setup → recording → stop/save → receipt. Shared scroll views include bottom safe-area clearance for the floating tab bar.
+Tabs: Home, Leagues, History. Home costs/charts remain clearly labeled demo data. Local trips and walking tests persist across app restarts.
 
-## What works
+## Walking and driving
 
-- Foreground Core Motion recording requests device-motion samples at 10 Hz. Stores timestamps, uptime, phone-frame acceleration in g, rotation rate in radians/second, attitude in radians, and calibrated/smoothed forward/lateral acceleration in m/s².
-- Stationary calibration collects 20 stable readings (about 2 seconds). The phone must be secured flat, screen up, with its top edge manually aligned toward the vehicle front. Gravity projects this explicitly confirmed axis onto the horizontal plane; the app does not infer vehicle axes from phone axes automatically.
-- A low-pass filter feeds provisional candidate detection: braking 2.8, acceleration 2.5, cornering 2.8 m/s²; minimum 0.5 seconds and 4-second per-type cooldown. Settings are injectable through `DetectionConfiguration`. Detection requires a recent accepted GPS speed of at least 2 m/s. Thresholds are not validated safety classifications.
-- A changed mount tilt disables candidate detection. Gravity cannot detect a phone being rotated flat in its mount: keep the mounting direction fixed, and recalibrate before the next trip after changing it.
-- Core Location requests When In Use permission. Rejects fixes outside 35 m accuracy, stale/future points, invalid coordinates, duplicate/out-of-order times, and jumps over 65 m/s. Distance ignores movement inside the GPS uncertainty radius and does not interpolate gaps over 10 seconds. This conservative filtering may undercount travel.
-- Denied location, unavailable motion, and uncalibrated recording are supported. Receipts distinguish unavailable/partial distance and unavailable candidate detection. No GPS permission means no speed validation and no event detection.
-- Raw samples, timestamps, events, quality/interruption notes, and trip provenance are saved as Codable JSON in Application Support/DriveSave/trips.json. Writes are atomic and file-protected. Saved trips reload into History; demo trips remain available. Local files are not automatically uploaded. A save failure retains the pending trip in memory and offers retry; corrupted existing storage is reported instead of overwritten.
-- New recordings display **Estimate pending**. Actual fuel consumption, brake wear, and insurance costs are not measured. Demo fuel totals and chart include only the original sample estimates, excluding recordings with pending estimates.
-- A parked-only debug sheet shows live raw and calibrated values.
+Home → Start Trip → choose **Walking Test**, **Driving**, or **Demo Drive**.
 
-## Foreground limitation
+Walking Test uses Core Location only; no mount/calibration, driving events, or fuel estimates. Allow When In Use and Precise Location, walk outdoors for 1–2 minutes with the recording screen open, then stop walking and save. History hides Walking Tests by default; enable **Include Walking Tests** to view them. They never enter driving upload or league scoring.
 
-Leaving the recording tab, leaving the foreground, locking the phone, or an interruption that makes the scene inactive **ends recording and stops hardware**. Return to review/save the partial trip. Recording does not resume automatically. Keep the app open; do not rely on background tracking. Unsaved sessions are held in memory and can be lost if the process is terminated. Physical sensor accuracy, background behavior, and extended on-road recording have not been verified. Samples are retained in memory until saving; long-duration performance needs device testing.
+Driving requires a securely mounted, flat phone, screen up and top edge forward. Calibrate while parked, then start before moving. Orientation changes disable detection. Candidate driving events remain unvalidated. Demo Drive generates synthetic inputs and is labeled accordingly.
 
-## Simulator test
+All recording is foreground only. Locking, leaving the app or switching tabs ends capture; return to save. Unsaved sessions may be lost on process termination. Do not interact while driving. GPS quality, gaps and incomplete measurements are shown. The scroll viewport now reserves actual space above the native tab bar so save controls do not sit underneath it.
 
-1. Home → **Start Trip**.
-2. Turn on **Simulator test mode**. It generates synthetic motion/GPS rather than accessing sensors.
-3. Confirm the parked/mounted toggle; tap **Calibrate mounted phone** for synthetic calibration.
-4. Tap **Start simulated trip**; wait about 13 seconds to generate all three candidate event types.
-5. Tap **Stop & save · I’m parked**. The receipt is labeled simulated with its estimate pending.
-6. Open History, inspect the saved trip, terminate/relaunch, and confirm it remains.
-7. Start another test, go to the Home Screen, then return. Recording should have ended; save the partial session.
+## Backend setup
 
-## Physical iPhone test
+Home → **API & Vehicle**:
 
-1. Connect a developer-mode iPhone running iOS 17+, choose your team and device in Xcode, then Run.
-2. While parked, tap Start Trip with simulator mode **off**. Enable location and allow While Using. For a denial test, choose Don’t Allow; you should still be able to record/save an unavailable-distance session without crashing. Permission can be changed under Settings → Privacy & Security → Location Services → Drive Save.
-3. Secure the phone flat, screen up, top edge facing forward. Confirm the mount toggle and calibrate while the car remains still. If calibration times out, correct the mount and retry. Do not use an unsupported vertical mount.
-4. Start recording before moving. Keep the app foreground and phone secured. A passenger may inspect debug readings while parked; the driver must not interact while driving. Never deliberately perform harsh maneuvers for testing.
-5. After parking, stop/save. Confirm duration, GPS quality, candidate events, timestamps, pending financial estimate, and recorded provenance. Reopen History after relaunch.
-6. Compare distance to a known route and evaluate motion readings on actual hardware. No claim of measurement accuracy is made by simulator tests. Test denied/unavailable GPS and interruptions separately while parked.
+1. Default is offline mock mode. Turn on **Use remote backend** and Apply to select `https://drivesave.nuhylabs.com`.
+2. Register a nickname. Tokens and returned user IDs are stored securely in Keychain. Existing sessions restore when applying the same remote connection. Demo accounts can recover once from 401/server resets, with a visible notice.
+3. Import your complete selected EPA vehicle JSON, or load the explicitly labeled backend EPA example. Save selection and optionally Upload vehicle / Fetch server vehicle. Confirm a row matches your actual vehicle before real uploads. No invented car data or full EPA catalog is included.
+4. Open an eligible trip receipt → **Upload / retry & fetch receipt**. Old/incomplete trips explain why they cannot upload; no missing evidence is fabricated. The stable UUID, payload, and vehicle are preserved for retries. API payloads never include coordinates.
+5. To demonstrate without a car, choose **Upload / retry demo replay** in API & Vehicle. It uses the backend's sample trip with `source: replayed`, `is_demo: true`, under a separate isolated replay account that cannot join leagues. It does not affect the normal driver's rankings.
 
-## Backend preparation
+The current server's flat-per-event prices are labeled **PLACEHOLDER PRICING**, not measured fuel waste. Actual response fields, assumptions, source links and estimate/demo markers appear on receipts. Network errors support manual retry, duplicates reuse the original receipt, conflicts stay visible, and validation errors show field details. Uploads are never automatic.
 
-`APIClient.Mode.mock` remains the default. Inject `.live(baseURL: URL(...))` into AppViewModel to use a configurable HTTPS base URL. No keys are embedded. Provisional contracts, to be agreed with teammates:
+**Server limitation:** the current scoring service counts demo trips in a user's progress. This app isolates replay credentials; server-side filtering still needs a backend fix. No backend or analytics files were changed.
 
-- `GET /ios/snapshot` → `{ "trips": [...], "crews": [...] }` (camelCase Codable fields; ISO 8601 dates).
-- `POST /ios/trips` → `TripUploadRequest { schemaVersion: 1, trip: Trip }`. `uploadTrip` is implemented using URLSession/async-await but is not called automatically. Authentication, server acknowledgement, deduplication, retries, analytics calculation, and real competition remain integration work.
+## Leagues
 
-## Files
+Drivers compete individually inside a private league. Create League joins you automatically; Join League requires both league UUID and invite code from the shared invite. Joining changes your membership on the backend. At least four members are required for ranks. Drivers without a complete baseline show “Awaiting baseline.” Offline standings are fictional and labeled. There is no crew-against-crew UI.
 
-App foundation: `DriveAndSave/DriveAndSaveApp.swift`, `Models/DrivingModels.swift`, `MockData/DemoData.swift`, `Views/CrewLeaderboardView.swift`, asset catalog and mint AccentColor.
+The backend changed its leaderboard response during integration. The app follows the re-fetched source and live OpenAPI (user_id/nickname, nullable rank/improvement, league-level demo flag). See [Backend integration details](Docs/BackendIntegration.md) for exact behavior, model comparisons, file inventory and remaining limits.
 
-Added for recording:
+## Checks
 
-- `DriveAndSave/Models/RecordingModels.swift` — sample/event/detail models, configurable detector, GPS distance filter.
-- `DriveAndSave/Services/TripRecordingService.swift` — foreground motion/GPS lifecycle, calibration, simulator source, debug state.
-- `DriveAndSave/Services/TripStore.swift` — local JSON persistence.
-- `DriveAndSave/Views/TripRecordingView.swift` — setup, recording, safe stop/save, debug sheet.
-- `DriveAndSaveUITests/RecordingFlowTests.swift` — permission denial, foreground/tab interruption, recording, persistence and screen navigation.
-- `Tests/main.swift` — portable detector, persistence, Codable and GPS regression checks.
-
-Updated for recording:
-
-- `DriveAndSave/Models/DrivingModels.swift` — optional recording details and quality-aware labels.
-- `DriveAndSave/ViewModels/AppViewModel.swift` — merge local recordings and preserve demo-only cost totals.
-- `DriveAndSave/Services/APIClient.swift` — provisional trip upload request and method.
-- `DriveAndSave/Components/DesignSystem.swift` — bottom safe-area spacing and provenance-aware trip rows.
-- `DriveAndSave/Views/HomeView.swift` — Start Trip and clear demo-only financial totals.
-- `DriveAndSave/Views/TripReceiptView.swift` — recording quality, exact duration, candidate turns, pending costs.
-- `DriveAndSave/Views/TripHistoryView.swift` — saved recordings and demo-only cost chart.
-- `DriveAndSave.xcodeproj/project.pbxproj` — motion/location privacy strings and UI test target.
-- `DriveAndSave.xcodeproj/xcshareddata/xcschemes/DriveAndSave.xcscheme` — shared Test action.
-- `README.md` — implementation, accuracy and testing instructions.
-
-## Automated checks
-
-Build and UI tests (substitute an available simulator name as needed):
+Offline UI tests (default mock mode; simulator location should be denied or fresh):
 
 ```sh
 xcodebuild -project DriveAndSave.xcodeproj -scheme DriveAndSave \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.4' \
   -derivedDataPath /tmp/DriveAndSaveBuild -parallel-testing-enabled NO \
-  CODE_SIGNING_ALLOWED=NO test
+  -skip-testing:DriveAndSaveUITests/WalkingGPSRouteTests \
+  -skip-testing:DriveAndSaveUITests/RemoteAuthenticationTests CODE_SIGNING_ALLOWED=NO test
 ```
 
-The denial UI test expects a fresh simulator location permission or an already denied permission. Reset this app's simulator location permission before running if you previously granted it. Tests save clearly labeled test sessions to the simulator app's History.
+WalkingGPSRouteTests requires granted simulator location and an active `simctl location ... start` walking route; this checks the Core Location code path, not physical accuracy. RemoteAuthenticationTests is opt-in: it registers a dedicated demo user and verifies Keychain restoration with a separate test credential namespace.
 
-Portable regression checks:
+Portable checks:
 
 ```sh
 swiftc -module-cache-path /tmp/drive-save-module-cache \
-  DriveAndSave/Models/DrivingModels.swift DriveAndSave/Models/RecordingModels.swift \
-  DriveAndSave/Services/TripStore.swift DriveAndSave/MockData/DemoData.swift \
+  DriveAndSave/Models/{DrivingModels,RecordingModels,BackendModels,TripExportPayload}.swift \
+  DriveAndSave/Services/{TripStore,APIClient}.swift DriveAndSave/MockData/DemoData.swift \
   Tests/main.swift -o /tmp/drive-save-model-tests-runner
 /tmp/drive-save-model-tests-runner
+
+swiftc -module-cache-path /tmp/drive-save-module-cache \
+  DriveAndSave/Models/{DrivingModels,RecordingModels,BackendModels}.swift \
+  DriveAndSave/Services/{TripUploadBuilder,KeychainCredentialStore,BackendAPIClient}.swift \
+  DriveAndSave/MockData/DemoData.swift Tests/BackendTests.swift -o /tmp/drivesave-backend-tests
+/tmp/drivesave-backend-tests
 ```
 
-Xcode simulator compilation passed. All four UI tests passed on iPhone 17 Pro/iOS 26.4, including denied permission, foreground interruption, tab interruption, simulated recording, persistence, receipt navigation and existing tabs. Nineteen portable regression checks passed. Saved JSON was inspected to confirm synthetic acceleration/braking/turn candidates, motion samples, GPS samples and simulated provenance. No physical-device or backend validation has been performed.
+`python3 Tests/production_smoke.py` is an explicit live test that creates only dedicated test users and an inactive test league. It never logs/writes tokens or resets/deletes existing data. Do not run it as a routine offline unit test.
+
+Physical driving accuracy and uninterrupted background recording are not validated or claimed. The full EPA catalog, automatic background sync, and a real financial cost model remain outside this implementation.
+
+## Integration verification
+
+- Signed simulator remote registration and Keychain restoration passed using a dedicated demo user in an isolated test credential namespace.
+- 34 existing model/GPS/persistence checks and 25 contract/serialization/HTTP checks passed.
+- Offline API registration, complete EPA fixture, replay, placeholder receipt and inactive-league UI flow passed. Existing driving denial, recording interruption, simulated recording and history UI flows passed.
+- Production health, registration, vehicle PUT/GET, replay 201, duplicate 200, conflict 409, validation 422 with details, invalid-token 401, receipt, league create/join/get and the updated member leaderboard were verified using dedicated disposable test users only.
+- Production testing confirmed the demo-scoring gap described above. Replay identities were never added to a league; test leagues were left inactive. No reset/delete endpoints were used and no credentials were logged.
+
+All eight distinct UI flows passed in batches, including Walking Test filtering/persistence, save-button clearance and the final Core Location route. The production Swift client was also exercised end-to-end with `Tests/LiveClientSmoke.swift`, using only dedicated disposable accounts and an inactive test league. Full results and test limits are recorded in [BackendIntegration.md](Docs/BackendIntegration.md).

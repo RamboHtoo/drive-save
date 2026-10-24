@@ -5,9 +5,10 @@ import SwiftUI
 @main
 struct DriveAndSaveApp: App {
     @StateObject private var model = AppViewModel()
+    @StateObject private var backend = BackendViewModel()
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(model).preferredColorScheme(.dark).tint(DS.mint)
+            RootView().environmentObject(model).environmentObject(backend).preferredColorScheme(.dark).tint(DS.mint)
         }
     }
 }
@@ -17,7 +18,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack { HomeView() }.tabItem { Label("Home", systemImage: "square.grid.2x2.fill") }
-            NavigationStack { CrewLeaderboardView() }.tabItem { Label("Crew", systemImage: "person.3.fill") }
+            NavigationStack { CrewLeaderboardView() }.tabItem { Label("Leagues", systemImage: "person.3.fill") }
             NavigationStack { TripHistoryView() }.tabItem { Label("History", systemImage: "chart.xyaxis.line") }
         }
         .toolbarBackground(DS.background, for: .tabBar)

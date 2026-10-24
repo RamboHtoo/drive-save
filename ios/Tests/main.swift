@@ -34,7 +34,7 @@ let corruptURL = URL(fileURLWithPath: "/tmp/drive-save-model-tests/corrupt.json"
 try Data("invalid".utf8).write(to: corruptURL)
 do { _ = try TripStore(fileURL: corruptURL).load(); fatalError("Expected corrupt store failure") }
 catch { print("PASS: corrupted storage reports an error") }
-print("All model tests passed.")
+
 
 var gpsFilter = GPSDistanceFilter()
 func point(_ seconds: Double, lat: Double = 40, accuracy: Double = 5) -> GPSPoint {
@@ -51,3 +51,74 @@ let stationary = gpsFilter.accept(point(3, lat: 40.000201), startedAt: date, now
 check(stationary?.addedMeters == 0 && stationary?.hasDistance == true, "stationary GPS drift does not inflate distance")
 let gap = gpsFilter.accept(point(20, lat: 40.001), startedAt: date, now: date.addingTimeInterval(20))
 check(gap?.gap == true && gap?.addedMeters == 0, "GPS gaps are flagged and not interpolated")
+
+
+var walkingFilter = GPSDistanceFilter(maximumSpeedMetersPerSecond: 12)
+var walkingMeters = 0.0
+for second in 0...10 {
+    let update = walkingFilter.accept(point(Double(second), lat: 40 + Double(second)*0.00001), startedAt: date, now: date.addingTimeInterval(Double(second)))
+    walkingMeters += update?.addedMeters ?? 0
+}
+check(walkingMeters > 9 && walkingMeters < 13, "small walking steps accumulate past noise threshold")
+var walking = recorded
+walking.activity = .walkingTest
+check(walking.displayTitle == "Walking Test" && !walking.hasEstimate, "Walking Test label and no fuel estimate")
+check(!walking.isCrewCandidate && [walking, recorded, demo].crewCandidates == [recorded], "Walking Tests and demos excluded from crew inputs")
+check([walking, recorded, demo].drivingOnly == [recorded, demo], "Walking Tests excluded from driving history")
+try store.save([walking, recorded])
+let reloadedWalking = try store.load()
+check(reloadedWalking.first == walking, "Walking Test provenance persists and reloads")
+let payload = TripExportPayload(trip: walking)
+let payloadData = try payload.jsonData()
+let json = try JSONSerialization.jsonObject(with: payloadData) as! [String: Any]
+check(json["activity"] as? String == "walkingTest" && json["excludedFromCrewScoring"] as? Bool == true, "export preserves walking and crew exclusion")
+check(json["mpg"] == nil && json["fuelPrice"] == nil && json["modeledExcessGallons"] == nil, "Walking Test export omits fuel placeholders")
+check(json["distanceMiles"] == nil && json["measurementsIncomplete"] as? Bool == true, "export omits unavailable distance instead of sending false zero")
+check(json["startedAt"] is String, "export uses ISO 8601 timestamps")
+var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(recorded)) as! [String: Any]
+legacy.removeValue(forKey: "activity")
+let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+let legacyTrip = try JSONDecoder().decode(Trip.self, from: legacyData)
+check(legacyTrip.isDriving, "legacy saved trips without activity still load as driving")
+
+final class StubURLProtocol: URLProtocol {
+    static var status = 200
+    static var responseBody = Data()
+    static var received: URLRequest?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.received = request
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.responseBody)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+Task {
+    do {
+        let mock = APIClient(mode: .mock)
+        let snapshot = try await mock.fetchSnapshot()
+        check(snapshot.trips.count == DemoData.snapshot.trips.count, "mock snapshot remains isolated from network")
+        if case .mockPreview(let preview) = try await mock.uploadTrip(walking) {
+            check(!preview.isEmpty, "mock upload explicitly returns preview, not server success")
+        } else { fatalError("Mock should never report remote upload") }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [StubURLProtocol.self]
+        let configuration = APIClient.RemoteConfiguration(snapshotURL: URL(string: "https://example.invalid/team-confirmed-snapshot")!, tripUploadURL: URL(string: "https://example.invalid/team-confirmed-upload")!, snapshotMethod: "GET", tripUploadMethod: "POST", headers: ["X-Test": "fixture"], encodeTrip: { try TripExportPayload(trip: $0).jsonData() }, decodeSnapshot: { try JSONDecoder().decode(AppSnapshot.self, from: $0) })
+        let remote = APIClient(mode: .remote(configuration), session: URLSession(configuration: sessionConfiguration))
+        StubURLProtocol.responseBody = try JSONEncoder().encode(DemoData.snapshot)
+        _ = try await remote.fetchSnapshot()
+        check(StubURLProtocol.received?.url == configuration.snapshotURL, "remote mode uses supplied endpoint and response adapter")
+        _ = try await remote.uploadTrip(walking)
+        check(StubURLProtocol.received?.httpMethod == "POST" && StubURLProtocol.received?.value(forHTTPHeaderField: "X-Test") == "fixture", "remote upload uses supplied method, headers and payload adapter")
+        StubURLProtocol.status = 503
+        do { _ = try await remote.fetchSnapshot(); fatalError("Expected HTTP error") }
+        catch APIClient.APIError.httpStatus(503) { print("PASS: remote HTTP error is surfaced") }
+        print("All regression checks passed.")
+        exit(0)
+    } catch { print("FAIL: \(error)"); exit(1) }
+}
+dispatchMain()

@@ -3,6 +3,8 @@ import Charts
 
 struct TripHistoryView: View {
     @EnvironmentObject private var model: AppViewModel
+    @State private var includeWalkingTests = false
+    private var visibleTrips: [Trip] { includeWalkingTests ? model.trips : model.drivingTrips }
     var body: some View {
         Screen {
             if model.client.isMock { Text("Demo cost chart · device recordings labeled below").font(.caption).foregroundStyle(DS.secondary) }
@@ -23,17 +25,19 @@ struct TripHistoryView: View {
                 .chartXAxis { AxisMarks(values: .stride(by: .day)) { _ in AxisValueLabel(format: .dateTime.weekday(.abbreviated)) } }
                 .frame(height: 180)
             }
+            Toggle("Include Walking Tests", isOn: $includeWalkingTests).accessibilityIdentifier("includeWalkingTests")
+            Text("Walking Tests never contribute to driving costs or league rankings.").font(.caption).foregroundStyle(DS.secondary)
             Text("Trip archive").font(.title2.bold())
             Surface {
-                if model.trips.isEmpty { ContentUnavailableView("No trips yet", systemImage: "car.side", description: Text("Completed drives will appear here.")) }
-                ForEach(model.trips) { trip in
+                if visibleTrips.isEmpty { ContentUnavailableView("No trips yet", systemImage: "car.side", description: Text("Completed drives will appear here.")) }
+                ForEach(visibleTrips) { trip in
                     NavigationLink { TripReceiptView(trip: trip) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(trip.date.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(DS.secondary)
                             TripRow(trip: trip)
                         }
                     }.buttonStyle(.plain)
-                    if trip.id != model.trips.last?.id { Divider() }
+                    if trip.id != visibleTrips.last?.id { Divider() }
                 }
             }
         }.navigationTitle("Trip history").navigationBarTitleDisplayMode(.inline).refreshable { await model.load() }

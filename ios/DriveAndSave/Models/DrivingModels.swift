@@ -2,6 +2,8 @@ import Foundation
 
 enum DataSource: String, Codable { case simulated, measured }
 
+enum TripActivity: String, Codable { case driving, walkingTest }
+
 struct Trip: Identifiable, Codable, Hashable {
     let id: UUID
     let title: String
@@ -15,9 +17,26 @@ struct Trip: Identifiable, Codable, Hashable {
     let modeledExcessGallons: Double
     let source: DataSource
     var recording: RecordingDetails? = nil
+    // Optional for compatibility with existing saved trips; missing values mean driving.
+    var activity: TripActivity? = nil
+    var clientTripID: UUID? = nil
+    var isWalkingTest: Bool { activity == .walkingTest }
+    var displayTitle: String { isWalkingTest ? "Walking Test" : title }
+    var isDriving: Bool { !isWalkingTest }
+    // Candidate input only; final scoring eligibility must be agreed with analytics.
+    var isCrewCandidate: Bool { isDriving && source == .measured && recording != nil }
+    var measurementsIncomplete: Bool {
+        guard let recording else { return false }
+        return recording.measurementsIncomplete ?? (!recording.distanceAvailable || recording.distanceIsPartial || (!isWalkingTest && !recording.motionAvailable))
+    }
+    var eventCountLabel: String {
+        if isWalkingTest { return "Disabled" }
+        if let recording, !recording.motionAvailable { return "Unavailable" }
+        return "\(eventCount)"
+    }
     var sharpTurns: Int { recording?.events.filter { $0.kind == .sharpTurn }.count ?? 0 }
     var eventCount: Int { harshBraking + rapidAcceleration + sharpTurns }
-    var hasEstimate: Bool { recording == nil && source == .simulated }
+    var hasEstimate: Bool { isDriving && recording == nil && source == .simulated }
     var distanceLabel: String {
         if let recording, !recording.distanceAvailable { return "Unavailable" }
         return String(format: "%.2f mi", distanceMiles)
@@ -27,7 +46,7 @@ struct Trip: Identifiable, Codable, Hashable {
         let seconds = Int(recording.elapsedSeconds)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
-    var provenanceLabel: String { source == .measured ? "RECORDED · DEVICE SENSORS" : "SIMULATED · DEMO" }
+    var provenanceLabel: String { if isWalkingTest { return source == .simulated ? "Walking Test · SIMULATED GPS" : "Walking Test · DEVICE GPS" }; return source == .measured ? "RECORDED · DEVICE SENSORS" : "SIMULATED · DEMO" }
     var baselineFuelCost: Double { distanceMiles / mpg * fuelPrice }
     var avoidableCost: Double { modeledExcessGallons * fuelPrice }
     var totalFuelCost: Double { baselineFuelCost + avoidableCost }
@@ -45,4 +64,10 @@ struct Crew: Identifiable, Codable {
 struct AppSnapshot: Codable {
     let trips: [Trip]
     let crews: [Crew]
+}
+
+
+extension Array where Element == Trip {
+    var drivingOnly: [Trip] { filter(\.isDriving) }
+    var crewCandidates: [Trip] { filter(\.isCrewCandidate) }
 }

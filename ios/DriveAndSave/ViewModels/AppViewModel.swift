@@ -10,6 +10,8 @@ final class AppViewModel: ObservableObject {
     private var localTrips: [Trip] = []
     let client: APIClient
     init(client: APIClient = APIClient(mode: .mock)) { self.client = client }
+    var drivingTrips: [Trip] { trips.drivingOnly }
+    var crewCandidateTrips: [Trip] { trips.crewCandidates }
     var estimatedTrips: [Trip] { trips.filter { $0.hasEstimate } }
     var avoidableCost: Double { estimatedTrips.reduce(0) { $0 + $1.avoidableCost } }
     var miles: Double { estimatedTrips.reduce(0) { $0 + $1.distanceMiles } }

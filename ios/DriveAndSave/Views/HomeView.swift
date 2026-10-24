@@ -14,6 +14,7 @@ struct HomeView: View {
                     .font(.headline).frame(maxWidth: .infinity).padding(18)
                     .foregroundStyle(DS.background).background(DS.mint, in: RoundedRectangle(cornerRadius: 18))
             }.accessibilityIdentifier("startTrip")
+            NavigationLink { APISettingsView() } label: { Label("API & Vehicle", systemImage: "person.crop.circle") }
             if model.client.isMock { DemoNotice(); Text("Cost totals use demo trips. New recordings show estimate pending.").font(.caption).foregroundStyle(DS.secondary) }
             Surface {
                 Label("YOUR OPPORTUNITY", systemImage: "arrow.up.right").font(.caption.bold()).tracking(1.5).foregroundStyle(DS.mint)
@@ -25,15 +26,15 @@ struct HomeView: View {
             }
             NavigationLink { CrewLeaderboardView() } label: {
                 Surface {
-                    HStack { Image(systemName: "bolt.shield.fill").foregroundStyle(DS.mint); Text("Better together").font(.headline); Spacer(); Image(systemName: "arrow.up.right") }
-                    Text("Nittany Cruisers is #2 in the demo rivalry.").font(.subheadline).foregroundStyle(DS.secondary)
-                    Text("MEET YOUR COMPETITION →").font(.caption.bold()).tracking(1).foregroundStyle(DS.mint)
+                    HStack { Image(systemName: "bolt.shield.fill").foregroundStyle(DS.mint); Text("Your private league").font(.headline); Spacer(); Image(systemName: "arrow.up.right") }
+                    Text("Drivers compete individually inside a private league.").font(.subheadline).foregroundStyle(DS.secondary)
+                    Text("OPEN LEAGUES →").font(.caption.bold()).tracking(1).foregroundStyle(DS.mint)
                 }
             }.buttonStyle(.plain)
             HStack { Text("Recent drives").font(.title2.bold()); Spacer(); NavigationLink("View all") { TripHistoryView() }.font(.subheadline.bold()) }
             Surface {
-                if model.trips.isEmpty { Text("Your trips will appear here.").foregroundStyle(DS.secondary) }
-                ForEach(model.trips.prefix(3)) { trip in
+                if model.drivingTrips.isEmpty { Text("Your trips will appear here.").foregroundStyle(DS.secondary) }
+                ForEach(model.drivingTrips.prefix(3)) { trip in
                     NavigationLink { TripReceiptView(trip: trip) } label: { TripRow(trip: trip) }.buttonStyle(.plain)
                 }
             }
