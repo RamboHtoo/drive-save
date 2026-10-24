@@ -98,14 +98,22 @@ Then open `https://api.example.com/health` on a phone **using cellular data, not
 
 ## Connect Tiger Data (once)
 
-The data teammate creates the Tiger Cloud service. In its SQL editor, connected as `tsdbadmin`, run these files from the repo in order:
+The data teammate creates the Tiger Cloud service. Then whoever has the `tsdbadmin` password runs this from the repo root, on a computer with `psql` and the server's SSH key. Pass the service's connection string from Tiger Console, without the password:
 
-1. [`analytics/schema.sql`](../analytics/schema.sql): tables, hypertables and the daily continuous aggregate. Skip it if `SELECT * FROM schema_versions;` already shows version 1.
+```bash
+backend/scripts/setup-tiger.sh "postgres://tsdbadmin@<host>:<port>/tsdb?sslmode=require"
+```
+
+It asks for the `tsdbadmin` password at a hidden prompt, then runs these files in order:
+
+1. [`analytics/schema.sql`](../analytics/schema.sql): tables, hypertables and the daily continuous aggregate. Skipped if `schema_versions` already shows version 1.
 2. [`analytics/queries.sql`](../analytics/queries.sql): the analytics functions the API calls (`drive_save_members`, `drive_save_baseline`, `drive_save_progress`).
 3. [`backend/db/002_event_details.sql`](../backend/db/002_event_details.sql): two event columns the cost model needs.
-4. [`backend/db/app_role.sql`](../backend/db/app_role.sql), after replacing `CHANGE_ME` with a password from `openssl rand -hex 24`. It creates `drivesave_app`, which can read and write app data but can't change the schema.
+4. [`backend/db/app_role.sql`](../backend/db/app_role.sql) with a new random password. It creates `drivesave_app`, which can read and write app data but can't change the schema.
 
-Then set `DATABASE_URL` in `backend/.env` on the server to the service's connection string with `drivesave_app` and its password, for example `postgres://drivesave_app:<password>@<host>:<port>/tsdb?sslmode=require`, and restart: `docker compose up -d`. Keep the password out of Git, Notion and chat.
+Then it checks that `drivesave_app` can read the tables and call the functions, and writes its `DATABASE_URL` into `backend/.env` on the server (`SERVER` and `SSH_KEY` at the top of the script; `SKIP_SERVER=1` skips this step). No password is printed. It's safe to rerun: a rerun gives `drivesave_app` a new password and updates the server. Restart the API afterwards so it uses the new URL: `docker compose up -d`.
+
+To do it by hand instead, run the four files in the Tiger Cloud SQL editor as `tsdbadmin` (replace `CHANGE_ME` in `app_role.sql` with a password from `openssl rand -hex 24`), then set `DATABASE_URL` in `backend/.env` on the server to `postgres://drivesave_app:<password>@<host>:<port>/tsdb?sslmode=require` and restart. Keep the password out of Git, Notion and chat.
 
 ## 9. Share the URL
 

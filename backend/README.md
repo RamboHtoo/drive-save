@@ -46,6 +46,7 @@ The tests run against the local TimescaleDB (empty tables before each test). The
 | `db/002_event_details.sql` | Adds two event columns the cost model needs to the shared schema |
 | `db/app_role.sql` | Least-privilege database role for the running app |
 | `scripts/test-db.sh` | Starts the local TimescaleDB used by tests and local runs |
+| `scripts/setup-tiger.sh` | One-time Tiger Cloud setup: schema, functions, the app role and the server's `DATABASE_URL`. See [`docs/deploy.md`](../docs/deploy.md) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Production stack: the API behind Caddy with automatic HTTPS. See [`docs/deploy.md`](../docs/deploy.md) |
 
 The tables and analytics functions (`analytics/schema.sql`, `analytics/queries.sql`) belong to the data teammate; see [`docs/database-setup.md`](../docs/database-setup.md).

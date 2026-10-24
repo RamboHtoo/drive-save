@@ -1,12 +1,18 @@
 -- Runtime role for the backend: reads and writes app data, can't change the schema.
--- Run once as tsdbadmin AFTER schema.sql, queries.sql and 002_event_details.sql.
+-- Run as tsdbadmin AFTER schema.sql, queries.sql and 002_event_details.sql.
 -- Replace CHANGE_ME with a long random password (e.g. `openssl rand -hex 24`).
+-- Safe to rerun: rerunning sets a new password and reapplies the grants.
 -- Never commit or paste the real password anywhere.
-CREATE ROLE drivesave_app LOGIN PASSWORD 'CHANGE_ME';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'drivesave_app') THEN
+    CREATE ROLE drivesave_app LOGIN;
+  END IF;
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO drivesave_app', current_database());
+END $$;
+ALTER ROLE drivesave_app WITH LOGIN PASSWORD 'CHANGE_ME';
 
-GRANT CONNECT ON DATABASE tsdb TO drivesave_app;
 GRANT USAGE ON SCHEMA public TO drivesave_app;
-
 GRANT SELECT, INSERT, UPDATE ON
   public.users, public.crews, public.crew_members,
   public.trips, public.trip_events, public.speed_samples,
