@@ -64,10 +64,23 @@ def test_upload_sample_trip_and_read_receipt(client):
     receipt = client.get(created["receipt_url"], headers=headers).json()
     assert receipt["trip_id"] == created["trip_id"]
     assert receipt["is_estimate"] is True
-    assert len(receipt["events"]) == len(SAMPLE_TRIP["events"])
-    assert receipt["avoidable_fuel_usd"] <= receipt["fuel_cost_usd"]
-    gas = next(a for a in receipt["assumptions"] if a["key"] == "gas_price")
-    assert gas["source_url"].startswith("https://www.eia.gov/")
+    assert receipt["cost_model"] == "flat_per_event"
+    # Placeholder pricing: every harsh event costs $1.
+    assert [e["cost_usd"] for e in receipt["events"]] == [1.0] * len(SAMPLE_TRIP["events"])
+    assert receipt["avoidable_cost_usd"] == len(SAMPLE_TRIP["events"])
+    per_event = next(a for a in receipt["assumptions"] if a["key"] == "cost_per_event")
+    assert per_event["value"] == 1.0
+    assert per_event["is_estimate"] is True
+
+
+def test_trip_without_events_costs_nothing(client):
+    _, headers = new_user(client)
+    trip = copy.deepcopy(SAMPLE_TRIP)
+    trip["events"] = []
+    trip_id = upload(client, headers, trip).json()["trip_id"]
+    receipt = client.get(f"/trips/{trip_id}/receipt", headers=headers).json()
+    assert receipt["events"] == []
+    assert receipt["avoidable_cost_usd"] == 0
 
 
 def test_retried_upload_returns_same_trip(client):
@@ -156,8 +169,21 @@ def test_progress_sets_baseline_after_three_trips(client):
     progress = client.get(f"/users/{user_id}/progress", headers=headers).json()
     assert progress["trips_counted"] == 4
     assert progress["baseline_trips_needed"] == 0
-    assert progress["improvement_pct"] > 0
-    assert progress["est_savings_usd"] >= 0
+    # Baseline: 9 events over 19.2 mi. Fourth trip: 1 event over 6.4 mi, where the baseline rate predicts 3.
+    assert progress["improvement_pct"] == 66.7
+    assert progress["est_savings_usd"] == 2.0
+
+
+def test_vehicle_mpg_is_optional(client):
+    _, headers = new_user(client)
+    car = {"year": 2020, "make": "Honda", "model": "Civic"}
+    res = client.put("/users/me/vehicle", json=car, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["mpg_city"] is None
+    assert res.json()["mpg_source"] is None
+
+    res = client.put("/users/me/vehicle", json={**car, "mpg_city": 31, "mpg_hwy": 40}, headers=headers)
+    assert res.json()["mpg_source"] == "manual"
 
 
 def test_progress_is_self_only(client):

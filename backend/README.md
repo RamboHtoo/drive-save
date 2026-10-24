@@ -37,7 +37,8 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 | `auth.py` | Bearer tokens (only hashes are stored) |
 | `models/` | Pydantic request/response schemas: the API contract |
 | `routes/` | One file per resource: users, trips, crews, leaderboard |
-| `services/scoring.py` | Placeholder trip pricing and progress math; replaced by `analytics/finance.py` |
+| `services/cost_model.py` | Turns harsh events into dollars. Placeholder: $1 per event until the real cost model lands |
+| `services/scoring.py` | Baselines, improvement and estimated savings per driver |
 | `services/demo.py` | Labeled demo crews for the leaderboard |
 | `store.py` | Temporary in-memory storage; replaced by Tiger Data |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Production stack: the API behind Caddy with automatic HTTPS. See [`docs/deploy.md`](../docs/deploy.md) |
@@ -45,7 +46,7 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 ## Next steps
 
 1. Tiger Data: replace `store.py` with real tables (`DATABASE_URL`).
-2. Pricing: call `analytics/finance.py` from `services/scoring.py`.
+2. Cost model: replace the flat $1 per event in `services/cost_model.py` with the teammate's model.
 3. Vehicle lookup on fueleconomy.gov.
 4. Live game: `POST /games` and `WS /ws/games/{code}`.
 5. Deploy to Vultr: follow [`docs/deploy.md`](../docs/deploy.md).

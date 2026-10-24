@@ -61,11 +61,6 @@ class ReceiptEvent(BaseModel):
     cost_usd: float
 
 
-class Projection(BaseModel):
-    yearly_usd: float
-    basis: str
-
-
 class Assumption(BaseModel):
     key: str
     value: float
@@ -78,11 +73,9 @@ class Assumption(BaseModel):
 class Receipt(BaseModel):
     trip_id: UUID
     distance_mi: float
-    fuel_gal: float
-    fuel_cost_usd: float
-    avoidable_fuel_usd: float
     events: list[ReceiptEvent]
-    projection: Projection
+    avoidable_cost_usd: float = Field(description="Sum of the event costs for this trip")
+    cost_model: str = Field(description='Model that produced the dollar amounts; "flat_per_event" ($1 per event) until the real model lands')
     assumptions: list[Assumption]
     is_estimate: bool = True
     is_demo: bool = False

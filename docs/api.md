@@ -22,10 +22,10 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | --- | --- | --- |
 | `GET /health` | Deployment check (no auth) | Done |
 | `POST /users` | Create a user; returns `user_id` and `token` (no auth) | Done (in memory) |
-| `PUT /users/me/vehicle` | Register the car and its MPG | Manual MPG works; fueleconomy.gov lookup is a placeholder |
-| `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done, using placeholder pricing |
+| `PUT /users/me/vehicle` | Register the car; MPG is optional | Done (in memory); fueleconomy.gov lookup not built yet |
+| `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done, using the $1-per-event placeholder pricing |
 | `POST /trips` | Upload a trip summary and detected events | Done (in memory), idempotent |
-| `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Placeholder pricing until `analytics/finance.py` |
+| `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done; flat $1 per event until the cost model lands |
 | `POST /crews` | Create a crew; the creator joins automatically | Done (in memory) |
 | `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done (in memory) |
 | `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done (in memory) |
@@ -61,11 +61,12 @@ Response (`201`, or `200` for a duplicate):
 
 Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.json). The iOS app can bundle this file as its offline fallback.
 
-- `fuel_cost_usd`: what the fuel for this trip cost.
-- `avoidable_fuel_usd`: the part of that cost caused by aggressive driving.
-- `events[].cost_usd`: each event's share, split by kinetic energy (v₁² − v₂²).
-- `projection.yearly_usd`: this trip's waste per mile × yearly miles.
-- `assumptions[]`: every input with its `source_url` and `as_of` date. `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
+**Pricing is a placeholder: every harsh event (`harsh_brake`, `rapid_accel`, `sharp_turn`) costs a flat $1.** A teammate is building the real cost model. When it lands, the amounts change and fields may be added (for example fuel cost or a yearly projection), but the fields below keep their meaning.
+
+- `events[].cost_usd`: what each event cost ($1.00 each for now).
+- `avoidable_cost_usd`: the sum of the event costs for the trip.
+- `cost_model`: which model produced the amounts; `flat_per_event` for now.
+- `assumptions[]`: every input with its `source_url` and `as_of` date. For now it holds one entry, `cost_per_event` = 1.0. `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
 
 ## Crews and leaderboard
 
@@ -79,4 +80,4 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 ## Notes for the skeleton
 
 - Data lives in memory: **restarting the server deletes all users, crews and trips.** Call `POST /users` again after a restart.
-- Placeholder pricing uses 25 mpg city / 32 mpg highway until a vehicle is registered, and the EIA US average gas price ($4.284/gal, week of Oct 19, 2026).
+- Every harsh event costs a flat $1 until the real cost model lands, so progress and leaderboard amounts are placeholders too.

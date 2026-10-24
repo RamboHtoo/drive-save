@@ -7,7 +7,7 @@ import store
 from auth import get_current_user
 from errors import ApiError
 from models.trips import Receipt, TripCreate, TripCreated
-from services import scoring
+from services import cost_model
 
 router = APIRouter(tags=["trips"])
 
@@ -34,4 +34,4 @@ async def get_receipt(trip_id: UUID, user: store.UserRecord = Depends(get_curren
         raise ApiError(404, "trip_not_found", "No trip with that id")
     if record.user_id != user.user_id:
         raise ApiError(403, "forbidden", "You can only view your own receipts")
-    return scoring.price_trip(record)
+    return cost_model.price_trip(record)

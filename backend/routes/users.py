@@ -22,18 +22,9 @@ async def create_user(body: UserCreate) -> UserCreated:
 
 @router.put("/users/me/vehicle", response_model=VehicleOut)
 async def set_vehicle(body: VehicleIn, user: store.UserRecord = Depends(get_current_user)) -> VehicleOut:
-    if body.mpg_city and body.mpg_hwy:
-        vehicle = VehicleOut(**body.model_dump(), mpg_source="manual")
-    else:
-        # TODO(stage 2): look up MPG on fueleconomy.gov (/ws/rest/vehicle/menu/... -> city08, highway08).
-        vehicle = VehicleOut(
-            year=body.year,
-            make=body.make,
-            model=body.model,
-            mpg_city=scoring.DEFAULT_MPG_CITY,
-            mpg_hwy=scoring.DEFAULT_MPG_HWY,
-            mpg_source="mock",
-        )
+    # TODO: look up missing MPG on fueleconomy.gov for the cost model (/ws/rest/vehicle/menu/... -> city08, highway08).
+    entered = body.mpg_city is not None or body.mpg_hwy is not None
+    vehicle = VehicleOut(**body.model_dump(), mpg_source="manual" if entered else None)
     user.vehicle = vehicle
     return vehicle
 

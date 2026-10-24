@@ -28,9 +28,9 @@ class VehicleOut(BaseModel):
     year: int
     make: str
     model: str
-    mpg_city: float
-    mpg_hwy: float
-    mpg_source: Literal["fueleconomy.gov", "manual", "mock"]
+    mpg_city: float | None
+    mpg_hwy: float | None
+    mpg_source: Literal["fueleconomy.gov", "manual"] | None = Field(description="None until MPG is entered or looked up")
 
 
 class WeeklyPoint(BaseModel):
