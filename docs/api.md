@@ -2,7 +2,7 @@
 
 The contract between the iOS app, the backend and analytics. The source of truth is the Pydantic models in `backend/models/`; when the server is running, `/docs` shows the same contract interactively.
 
-- **Base URL (local):** `http://localhost:8000`. The Vultr HTTPS URL will be added here once it's deployed ([deployment guide](deploy.md)).
+- **Base URL:** `https://drivesave.nuhylabs.com` (Vultr, [deployment guide](deploy.md)). For local development: `http://localhost:8000`.
 - **Auth:** call `POST /users` once, keep the returned `token`, and send `Authorization: Bearer <token>` on every other request.
 - **Times:** UTC, ISO 8601 with a timezone (`2026-10-24T20:01:00Z`). Times without a timezone are rejected.
 - **Money:** USD. Every dollar figure is an estimate (`is_estimate: true`).
