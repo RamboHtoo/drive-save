@@ -36,8 +36,10 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 | `errors.py` | The shared `{"error": {...}}` response format |
 | `auth.py` | Bearer tokens (only hashes are stored) |
 | `models/` | Pydantic request/response schemas: the API contract |
-| `routes/` | One file per resource: users, trips, crews, leaderboard |
-| `services/cost_model.py` | Turns harsh events into dollars. Placeholder: $1 per event until the real cost model lands |
+| `routes/` | One file per resource: users, vehicles, trips, crews, leaderboard |
+| `models/cost_model.py` | What the cost model receives and returns. See [`docs/cost-model.md`](../docs/cost-model.md) |
+| `services/cost_model.py` | Builds the cost model input and calls the model. Placeholder: $1 per event until the real model lands |
+| `services/fueleconomy.py` | fueleconomy.gov client for the car picker and vehicle specs, cached in memory |
 | `services/scoring.py` | Baselines, improvement and estimated savings per driver |
 | `services/demo.py` | Labeled demo crews for the leaderboard |
 | `store.py` | Temporary in-memory storage; replaced by Tiger Data |
@@ -47,6 +49,6 @@ The tests upload [`fixtures/sample-trip.json`](../fixtures/sample-trip.json) and
 
 1. Tiger Data: replace `store.py` with real tables (`DATABASE_URL`).
 2. Cost model: replace the flat $1 per event in `services/cost_model.py` with the teammate's model.
-3. Vehicle lookup on fueleconomy.gov.
+3. Vehicle weight: fueleconomy.gov has none; add a source such as the EPA Test Car List.
 4. Live game: `POST /games` and `WS /ws/games/{code}`.
 5. Deploy to Vultr: follow [`docs/deploy.md`](../docs/deploy.md).

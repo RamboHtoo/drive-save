@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import config
 from errors import register_error_handlers
 from models.common import ErrorResponse, Health
-from routes import crews, leaderboard, trips, users
+from routes import crews, leaderboard, trips, users, vehicles
 
 app = FastAPI(
     title="Drive & Save API",
@@ -24,6 +24,7 @@ app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_meth
 register_error_handlers(app)
 
 app.include_router(users.router)
+app.include_router(vehicles.router)
 app.include_router(trips.router)
 app.include_router(crews.router)
 app.include_router(leaderboard.router)

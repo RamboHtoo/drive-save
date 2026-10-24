@@ -9,7 +9,7 @@ from datetime import datetime
 from uuid import UUID
 
 from models.trips import TripCreate
-from models.users import VehicleOut
+from models.vehicles import VehicleSpecs
 
 
 @dataclass
@@ -17,7 +17,7 @@ class UserRecord:
     user_id: UUID
     nickname: str
     token_hash: str
-    vehicle: VehicleOut | None = None
+    vehicle: VehicleSpecs | None = None
 
 
 @dataclass
@@ -35,6 +35,8 @@ class TripRecord:
     user_id: UUID
     trip: TripCreate
     uploaded_at: datetime
+    # The car selected at upload time, so later car changes don't rewrite old receipts.
+    vehicle: VehicleSpecs | None = None
 
 
 users: dict[UUID, UserRecord] = {}

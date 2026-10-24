@@ -17,9 +17,11 @@ class EventType(str, Enum):
 class TripEventIn(BaseModel):
     type: EventType
     ts: AwareDatetime
-    peak_g: float = Field(gt=0, le=2.0)
+    peak_g: float = Field(gt=0, le=2.0, description="Peak acceleration in g: forward/backward for harsh_brake and rapid_accel, sideways for sharp_turn")
     speed_before_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
     speed_after_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
+    duration_s: float | None = Field(default=None, gt=0, le=60, description="How long the event lasted")
+    heading_change_deg: float | None = Field(default=None, ge=0, le=360, description="How far the car turned, as an absolute angle; send for sharp_turn")
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
 

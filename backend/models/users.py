@@ -1,5 +1,4 @@
 from datetime import date
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -13,24 +12,6 @@ class UserCreated(BaseModel):
     user_id: UUID
     nickname: str
     token: str = Field(description="Send as 'Authorization: Bearer <token>'. Shown only once.")
-
-
-class VehicleIn(BaseModel):
-    year: int = Field(ge=1984, le=2027, description="fueleconomy.gov covers model years from 1984")
-    make: str = Field(min_length=1, max_length=40)
-    model: str = Field(min_length=1, max_length=60)
-    # Optional manual override when the fueleconomy.gov lookup fails.
-    mpg_city: float | None = Field(default=None, gt=0, le=150)
-    mpg_hwy: float | None = Field(default=None, gt=0, le=150)
-
-
-class VehicleOut(BaseModel):
-    year: int
-    make: str
-    model: str
-    mpg_city: float | None
-    mpg_hwy: float | None
-    mpg_source: Literal["fueleconomy.gov", "manual"] | None = Field(description="None until MPG is entered or looked up")
 
 
 class WeeklyPoint(BaseModel):
