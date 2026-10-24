@@ -3,7 +3,8 @@
 #   backend/scripts/setup-tiger.sh "postgres://tsdbadmin@HOST:PORT/tsdb?sslmode=require"
 # Pass the service's connection string from Tiger Console without the password; the
 # script asks for it at a hidden prompt. It
-#   1. applies analytics/schema.sql (skipped if the schema is already there)
+#   1. applies analytics/schema.sql (skipped if the schema is already there; stops
+#      without changing anything if Tiger is at another schema version)
 #   2. installs analytics/queries.sql (the functions the API calls)
 #   3. applies backend/db/002_event_details.sql
 #   4. creates the drivesave_app role, or gives it a new password if it exists
@@ -47,14 +48,20 @@ apply() {  # apply FILE (- for stdin), without the "already exists, skipping" no
 }
 
 echo "1/5 Schema"
+repo_version=$(sed -n -E 's/.*schema_versions \(version\) VALUES \(([0-9]+)\).*/\1/p' analytics/schema.sql | sort -n | tail -1)
 has_schema=$(admin -tAc "SELECT to_regclass('public.schema_versions') IS NOT NULL")
 if [[ $has_schema == f ]]; then
   apply analytics/schema.sql
-  echo "    applied analytics/schema.sql"
+  echo "    applied analytics/schema.sql (version $repo_version)"
 else
   version=$(admin -tAc "SELECT coalesce(max(version), 0) FROM public.schema_versions")
   if [[ $version == 0 ]]; then
     echo "public.schema_versions exists but is empty. Ask the data owner before applying schema.sql." >&2
+    exit 1
+  elif [[ $version != "$repo_version" ]]; then
+    # analytics/queries.sql must match the live tables, so never install it over another version.
+    echo "Tiger is at schema version $version, but this checkout's analytics/ SQL is version $repo_version." >&2
+    echo "Nothing was changed. Get the data teammate's SQL for version $version, then rerun." >&2
     exit 1
   fi
   echo "    already at version $version, skipped"

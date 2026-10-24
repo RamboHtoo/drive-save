@@ -106,7 +106,7 @@ backend/scripts/setup-tiger.sh "postgres://tsdbadmin@<host>:<port>/tsdb?sslmode=
 
 It asks for the `tsdbadmin` password at a hidden prompt, then runs these files in order:
 
-1. [`analytics/schema.sql`](../analytics/schema.sql): tables, hypertables and the daily continuous aggregate. Skipped if `schema_versions` already shows version 1.
+1. [`analytics/schema.sql`](../analytics/schema.sql): tables, hypertables and the daily continuous aggregate. Skipped if Tiger already has it. If Tiger is at a different schema version than this checkout, the script stops before changing anything: get the data teammate's SQL for that version first.
 2. [`analytics/queries.sql`](../analytics/queries.sql): the analytics functions the API calls (`drive_save_members`, `drive_save_baseline`, `drive_save_progress`).
 3. [`backend/db/002_event_details.sql`](../backend/db/002_event_details.sql): two event columns the cost model needs.
 4. [`backend/db/app_role.sql`](../backend/db/app_role.sql) with a new random password. It creates `drivesave_app`, which can read and write app data but can't change the schema.
