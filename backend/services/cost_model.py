@@ -1,7 +1,8 @@
 """Turns a trip's harsh events into dollars.
 
 build_input() gathers everything the cost model needs: the trip, each event's
-speeds, acceleration, duration and turn angle, and the car's specs.
+speeds, acceleration, duration, turn angle and the speed trace around it, and
+the car's specs.
 estimate() is the cost model itself. It's a placeholder that charges a flat $1
 per harsh event; the analytics teammate replaces its body (or imports their
 function here) and keeps the signature CostModelInput -> CostModelOutput.
@@ -41,6 +42,7 @@ def build_input(record: store.TripRecord) -> CostModelInput:
                 peak_g=e.peak_g,
                 mean_accel_g=None if mean_g is None else round(mean_g, 4),
                 heading_change_deg=e.heading_change_deg,
+                speed_trace=e.speed_trace,
                 lat=e.lat,
                 lng=e.lng,
             )

@@ -2,16 +2,22 @@ from datetime import date
 from enum import Enum
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 MAX_SPEED_MPH = 120
 MAX_EVENTS_PER_MINUTE = 10
+MAX_TRACE_SECONDS = 60
 
 
 class EventType(str, Enum):
     harsh_brake = "harsh_brake"
     rapid_accel = "rapid_accel"
     sharp_turn = "sharp_turn"
+
+
+class SpeedSample(BaseModel):
+    t_s: float = Field(ge=-MAX_TRACE_SECONDS, le=MAX_TRACE_SECONDS, description="Seconds from the event's ts; negative = before the event")
+    speed_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
 
 
 class TripEventIn(BaseModel):
@@ -22,8 +28,22 @@ class TripEventIn(BaseModel):
     speed_after_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
     duration_s: float | None = Field(default=None, gt=0, le=60, description="How long the event lasted")
     heading_change_deg: float | None = Field(default=None, ge=0, le=360, description="How far the car turned, as an absolute angle; send for sharp_turn")
+    speed_trace: list[SpeedSample] = Field(
+        min_length=2,
+        max_length=241,
+        description="Speeds around the event, oldest first: about one per second from 10 s before to 10 s after",
+    )
     lat: float | None = Field(default=None, ge=-90, le=90)
     lng: float | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("speed_trace")
+    @classmethod
+    def check_trace_surrounds_event(cls, trace: list[SpeedSample]) -> list[SpeedSample]:
+        if any(later.t_s <= earlier.t_s for earlier, later in zip(trace, trace[1:])):
+            raise ValueError("speed_trace times must increase")
+        if trace[0].t_s >= 0 or trace[-1].t_s <= 0:
+            raise ValueError("speed_trace must include speeds from before and after the event")
+        return trace
 
 
 class TripCreate(BaseModel):

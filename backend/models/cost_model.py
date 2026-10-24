@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from models.trips import Assumption, EventType
+from models.trips import Assumption, EventType, SpeedSample
 from models.vehicles import VehicleSpecs
 
 
@@ -33,6 +33,7 @@ class EventInput(BaseModel):
     peak_g: float = Field(description="Forward/backward for harsh_brake and rapid_accel, sideways for sharp_turn")
     mean_accel_g: float | None = Field(description="speed_change / duration in g; negative while slowing; None without duration_s")
     heading_change_deg: float | None = Field(description="How far the car turned; sent for sharp_turn")
+    speed_trace: list[SpeedSample] = Field(description="Speeds around the event, oldest first; t_s is seconds from ts, negative = before")
     lat: float | None
     lng: float | None
 

@@ -70,7 +70,10 @@ Example request: [`fixtures/sample-trip.json`](../fixtures/sample-trip.json).
 | `events[].speed_before_mph`, `speed_after_mph` | number | 0 to 120 |
 | `events[].duration_s` | number, optional | How long the event lasted, in seconds (up to 60). The cost model uses it for mean acceleration |
 | `events[].heading_change_deg` | number, optional | How far the car turned, 0 to 360 degrees. Send it for `sharp_turn` |
+| `events[].speed_trace` | list, **required** | Speeds around the event, oldest first: `[{"t_s": -10, "speed_mph": 34.5}, …, {"t_s": 10, "speed_mph": 22.5}]`. `t_s` is seconds from the event's `ts` (negative = before). Needs at least one sample before and one after the event, in increasing time order; up to 241 samples within ±60 s |
 | `events[].lat`, `lng` | number, optional | Valid coordinates |
+
+**Recording the speed trace:** keep the last 10 seconds of GPS speed (about one reading per second) in a rolling buffer. When an event is detected, attach that buffer, keep recording for 10 more seconds, and attach those readings too. The cost model uses the trace to compare each event with a smooth alternative.
 
 Response (`201`, or `200` for a duplicate):
 

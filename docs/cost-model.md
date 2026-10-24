@@ -43,6 +43,7 @@ Replace its body, or import your function there, and keep the signature. The sch
 | `peak_g` | g | Phone | Forward/backward for brake and accel, sideways for turns |
 | `mean_accel_g` | g | Derived | Speed change ÷ duration; negative while slowing; null without `duration_s` |
 | `heading_change_deg` | degrees | Phone | How far the car turned; `sharp_turn` only; optional |
+| `speed_trace` | s, mph | Phone | Required. Speeds around the event, oldest first, about 1 per second from 10 s before to 10 s after: `[{"t_s": -10, "speed_mph": 34.5}, …]`. `t_s` is seconds from `ts`, negative = before |
 | `lat`, `lng` | degrees | Phone | Optional |
 
 Optional fields can be null, so the model needs a fallback for each.
@@ -73,17 +74,13 @@ A snapshot of the car selected when the trip was uploaded, from fueleconomy.gov.
 | `event_costs_usd` | list of numbers | Exactly one per input event, in the same order. The backend rejects anything else |
 | `assumptions` | list | Every constant or data source used: `key`, `value`, `unit`, `source_url`, `as_of`, `is_estimate`. The receipt shows these to the user |
 
-## Data the model will probably need that we don't collect yet
+## Data still to add
 
-| Priority | Data | Why | Where to get it |
-| --- | --- | --- | --- |
-| Must | Vehicle weight | The energy to speed up, and the energy lost when braking, scale with mass | EPA Test Car List: "Equivalent Test Weight (lbs.)", roughly curb weight plus 300 lb, matched by year, make, model and engine size |
-| Must | Fuel price ($/gal), and electricity price ($/kWh) for EVs | Turns fuel or energy into dollars | EIA weekly retail gasoline prices (Pennsylvania → Central Atlantic, PADD 1B) and EIA electricity prices. The backend can fetch and pass these |
-| Must | Trip location | Picks the regional price; trips without events have no coordinates today | Phone: trip start latitude/longitude |
-| Should | Road-load coefficients A, B, C | Separates normal rolling resistance and air drag from avoidable energy | Same EPA Test Car List: "Target Coef A/B/C" |
-| Should | Elevation change | Speeding up uphill costs more; braking downhill is less avoidable | Phone: altitude or barometer change per event |
-| Should | Speed trace around each event | Lets the model compare each event against a smooth alternative | Phone: 1 Hz speeds for about 10 s before and after each event |
-| Could | Idle time and stop count | Idling burns fuel without moving | Phone: time spent stopped per trip |
-| Could | Time at high speed | Air drag grows with the square of speed | Phone: time above set speeds per trip |
-| Could | Event confidence | Lets the model discount uncertain events | Phone: GPS accuracy and sensor quality |
-| Could | Outside temperature, passengers and cargo | Cold weather, A/C and extra load lower efficiency | Weather API by place and time; ask the driver |
+| Data | Status | Notes |
+| --- | --- | --- |
+| Vehicle weight | Planned: comes with the selected car, from the data teammate's vehicle data | Must be matchable to fueleconomy.gov's `vehicle_id` (or year, make, model and engine) so the backend can attach it to `vehicle.weight_lb` |
+| Fuel price ($/gal) and electricity price ($/kWh) | Planned: the data teammate provides them | The backend adds them to the input once the format is agreed |
+| Trip location | Open | Picks the regional price; trips without events have no coordinates today |
+| Elevation change | Open, optional | Speeding up uphill takes extra energy; braking downhill is often unavoidable. The phone can measure it with GPS altitude or the barometer |
+| Road-load coefficients A, B, C | Open, optional | The force needed to keep moving at speed v: F = A + B·v + C·v². Separates the energy normal driving needs from waste. Listed in the EPA Test Car List next to the test weight |
+| Idle time, stop count, time at high speed, event confidence, temperature, load | Open, could | Each shifts efficiency a little |

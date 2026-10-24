@@ -287,11 +287,17 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, fake_fue
     assert inputs.trip.duration_s == 18 * 60
     # Every field the phone sent, for every event, in order.
     assert len(inputs.events) == len(SAMPLE_TRIP["events"])
+    def as_sent(field, value):
+        if field == "ts":
+            return value.isoformat().replace("+00:00", "Z")
+        if field == "speed_trace":
+            return [sample.model_dump() for sample in value]
+        return value
+
     for index, (sent, received) in enumerate(zip(SAMPLE_TRIP["events"], inputs.events)):
         assert received.index == index
         for field, value in sent.items():
-            got = getattr(received, field)
-            assert (got.isoformat().replace("+00:00", "Z") if field == "ts" else got) == value, field
+            assert as_sent(field, getattr(received, field)) == value, field
     # Derived values: speed change, speed during the event, mean acceleration.
     brake, accel, turn = inputs.events
     assert brake.speed_change_mph == -22.0
@@ -300,6 +306,31 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, fake_fue
     assert accel.mean_accel_g > 0
     assert turn.avg_speed_mph == 21.0
     assert turn.heading_change_deg == 85.0
+    # The speed trace around each event: 10 s before to 10 s after.
+    assert [(s.t_s, s.speed_mph) for s in brake.speed_trace[9:14]] == [(-1, 34.0), (0, 34.0), (1, 26.0), (2, 19.0), (3, 12.0)]
+    assert all(len(e.speed_trace) == 21 for e in inputs.events)
+
+
+@pytest.mark.parametrize(
+    "trace",
+    [
+        None,  # missing
+        [{"t_s": 1, "speed_mph": 20}, {"t_s": 2, "speed_mph": 21}],  # nothing from before the event
+        [{"t_s": -2, "speed_mph": 20}, {"t_s": -1, "speed_mph": 21}],  # nothing from after the event
+        [{"t_s": 1, "speed_mph": 20}, {"t_s": -1, "speed_mph": 21}],  # times out of order
+        [{"t_s": -1, "speed_mph": 20}],  # a single sample
+    ],
+)
+def test_speed_trace_is_required_and_must_surround_the_event(client, trace):
+    _, headers = new_user(client)
+    trip = copy.deepcopy(SAMPLE_TRIP)
+    if trace is None:
+        del trip["events"][0]["speed_trace"]
+    else:
+        trip["events"][0]["speed_trace"] = trace
+    res = upload(client, headers, trip)
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "validation_error"
 
 
 def test_cost_model_input_without_car_or_optional_fields(client, model_inputs):
