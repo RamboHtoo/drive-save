@@ -35,6 +35,33 @@ final class BackendViewModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var errorMessage: String?
     @Published private var revision = 0
+    @Published private(set) var progress: APIProgress?
+    @Published private(set) var progressError: String?
+    @Published private(set) var isRefreshingProgress = false
+    @Published private(set) var progressContext = 0
+    private var progressRequest = 0
+
+    private func clearProgress() {
+        progressRequest += 1; progressContext += 1
+        progress = nil; progressError = nil; isRefreshingProgress = false
+    }
+    func refreshProgress() async {
+        guard isRemote, let owner = identity?.userID else { return }
+        progressRequest += 1
+        let request = progressRequest, context = progressContext, client = api
+        isRefreshingProgress = true; progressError = nil
+        defer { if request == progressRequest { isRefreshingProgress = false } }
+        do {
+            let loaded = try await client.progress()
+            guard request == progressRequest, context == progressContext, identity?.userID == owner, isRemote else { return }
+            progress = loaded
+        } catch {
+            guard request == progressRequest, context == progressContext, identity?.userID == owner, isRemote else { return }
+            if Task.isCancelled { return }
+            progress = nil // Never substitute demo values or a different account's cached money.
+            progressError = error.localizedDescription
+        }
+    }
     private let credentialSuffix: String = {
         let arguments = ProcessInfo.processInfo.arguments
         if let id = arguments.first(where: { $0.hasPrefix("--account-test-id=") }) { return "#" + id }
@@ -63,7 +90,7 @@ final class BackendViewModel: ObservableObject {
         await run {
             try await api.resetLocalAccount()
             if !isRemote { state.offlineLeague = nil; try persist() }
-            identity = nil; vehicle = nil; vehicleConfirmed = false; league = nil; standings = []; notice = nil
+            clearProgress(); identity = nil; vehicle = nil; vehicleConfirmed = false; league = nil; standings = []; notice = nil
         }
     }
     private func persist() throws {
@@ -81,7 +108,7 @@ final class BackendViewModel: ObservableObject {
         catch { errorMessage = error.localizedDescription }
         do {
             let updated = try await api.identity()
-            if identity != updated { identity = updated; try restoreLocalVehicle(); league = nil; standings = [] }
+            if identity != updated { clearProgress(); identity = updated; try restoreLocalVehicle(); league = nil; standings = [] }
             if let message = await api.takeResetNotice() { notice = message; recoveryMessage = message; league = nil; standings = [] }
         } catch { errorMessage = error.localizedDescription }
     }
@@ -92,7 +119,7 @@ final class BackendViewModel: ObservableObject {
             api = BackendAPIClient(mode: remote ? .remote(url!) : .mock, mockLeague: remote ? nil : state.offlineLeague, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock")))
             replayAPI = BackendAPIClient(mode: remote ? .remote(url!) : .mock, demoOnly: true, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock") + "#isolated-replay"))
             remoteURL = baseURL
-            isRemote = remote; identity = nil; league = nil; standings = []
+            clearProgress(); isRemote = remote; identity = nil; league = nil; standings = []
             notice = remote ? "Remote API selected. Register or restore your saved Keychain session before uploading." : "Offline mock API selected. Nothing is sent to the server."
             identity = try await api.identity()
             try restoreLocalVehicle()
@@ -100,7 +127,7 @@ final class BackendViewModel: ObservableObject {
         }
     }
     func register(nickname: String, demoAccount: Bool) async {
-        await run { identity = try await api.register(nickname: nickname, demoAccount: demoAccount); try restoreLocalVehicle(); league = nil; standings = []; notice = isRemote ? "Registered. Credentials saved securely in Keychain." : "Offline mock user registered. No network request was made." }
+        await run { clearProgress(); identity = try await api.register(nickname: nickname, demoAccount: demoAccount); try restoreLocalVehicle(); league = nil; standings = []; notice = isRemote ? "Registered. Credentials saved securely in Keychain." : "Offline mock user registered. No network request was made." }
     }
     func selectVehicle(json: String, confirmed: Bool) {
         do {
@@ -199,6 +226,7 @@ final class BackendViewModel: ObservableObject {
         if state.vehicleSelections == nil { state.vehicleSelections = [:] }
         state.vehicleSelections?[key(owner)] = row.map { .init(row: $0, confirmed: confirmed, synced: synced) }
         do { try persist() } catch { state = previous; throw error }
+        if vehicle != row { clearProgress() }
         vehicle = row; vehicleConfirmed = confirmed
     }
 
@@ -220,6 +248,7 @@ final class BackendViewModel: ObservableObject {
     }
     func upload(trip: Trip) async {
         await run { try await submit(TripUploadBuilder.payload(for: trip)) }
+        await refreshProgress()
     }
     func replayContractFixture() async {
         await run {
@@ -264,6 +293,7 @@ final class BackendViewModel: ObservableObject {
         if let reset = await uploadAPI.takeResetNotice() { notice = reset; recoveryMessage = reset }
     }
     func createLeague(name: String) async {
+        var createdSuccessfully = false
         await run {
             guard identity != nil else { throw BackendError.invalidInput("Complete welcome registration first.") }
             let created = try await api.createLeague(name: name)
@@ -271,16 +301,21 @@ final class BackendViewModel: ObservableObject {
             if !isRemote { state.offlineLeague = created }
             if let id = try await api.identity()?.userID { state.leagueByUser[key(id)] = created.crew_id; try persist() }
             notice = "League created. You compete individually; rankings require 4+ members."
+            createdSuccessfully = true
         }
+        if createdSuccessfully { await refreshLeague() }
     }
     func joinLeague(id: String, code: String) async {
+        var joinedSuccessfully = false
         await run {
             guard identity != nil, let uuid = UUID(uuidString: id.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw BackendError.invalidInput("Register and enter the league UUID plus invite code.") }
             let joined = try await api.joinLeague(id: uuid, code: code)
             league = joined; standings = []
             if let userID = try await api.identity()?.userID { state.leagueByUser[key(userID)] = joined.crew_id; try persist() }
             notice = "Joined league. The backend moves you out of any previous league."
+            joinedSuccessfully = true
         }
+        if joinedSuccessfully { await refreshLeague() }
     }
     func refreshLeague() async {
         await run {

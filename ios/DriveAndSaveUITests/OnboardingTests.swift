@@ -13,6 +13,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(app.buttons["welcomeRegister"].isEnabled)
         let welcome = XCTAttachment(screenshot: app.screenshot()); welcome.name = "First launch welcome"; welcome.lifetime = .keepAlways; add(welcome)
         nickname.tap(); nickname.typeText("Walking Buddy")
+        app.buttons["Developer options"].tap()
         app.switches["offlineOnboarding"].tap()
         app.buttons["welcomeRegister"].tap()
         XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 10))

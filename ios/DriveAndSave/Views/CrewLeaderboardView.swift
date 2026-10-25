@@ -4,22 +4,19 @@ struct CrewLeaderboardView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Screen {
-            Eyebrow(text: backend.isRemote ? "Online" : "Offline demo · no multiplayer")
+            if !backend.isRemote { Eyebrow(text: "Offline demo · no multiplayer") }
             DisplayType(backend.league?.name ?? "Leagues", size: 48).accessibilityAddTraits(.isHeader).accessibilityIdentifier("leagueHeadline")
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { leagueActions }
-                VStack(spacing: 12) { leagueActions }
-            }
+            if backend.league == nil { leagueActionLayout }
             if let league = backend.league {
                 Surface {
-                    if league.is_demo { DemoNotice() }
+                    if league.is_demo { Eyebrow(text: backend.isRemote ? "Demo league · experimental scoring" : "Offline demo league") }
                     Text("\(league.member_count) \(league.member_count == 1 ? "member" : "members") · \(league.canRank ? "Ranked" : "4 needed to rank")").font(.headline)
-                    if !league.canRank { QualificationMarks(memberCount: league.member_count) }
+
                     LeagueInviteActions(league: league)
                 }
                 if league.canRank {
                     Eyebrow(text: "Standings")
-                    if backend.leaderboardIsDemo { DemoNotice() }
+                    if backend.leaderboardIsDemo && !league.is_demo { Eyebrow(text: "Demo league · experimental scoring") }
                     if backend.standings.isEmpty {
                         Text("Rankings begin after 3 eligible trips per driver.").foregroundStyle(DS.secondary)
                         ForEach(league.members) { member in
@@ -28,8 +25,8 @@ struct CrewLeaderboardView: View {
                     }
                     ForEach(backend.standings) { standing in
                         ChampionshipRow(rank: standing.rank, name: standing.nickname,
-                            result: standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? "Awaiting baseline",
-                            detail: "\(standing.trips_counted) trips · \(standing.est_savings_usd.dollars) estimated · pricing may be placeholder",
+                            result: standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? standing.availability,
+                            detail: standing.rank == nil ? "" : "\(standing.trips_counted) trips · \(standing.est_savings_usd.receiptDollars) estimated",
                             isCurrent: standing.user_id == backend.identity?.userID)
                     }
                 } else {
@@ -38,29 +35,25 @@ struct CrewLeaderboardView: View {
                         ChampionshipRow(rank: nil, name: member.nickname, result: "Not ranked", detail: "", isCurrent: member.user_id == backend.identity?.userID)
                     }
                 }
-            } else if !backend.isRemote {
-                Surface {
-                    DemoNotice()
-                    Text("Example standings").font(DS.section)
-                    Text("Fictional drivers · no competition data").font(.caption).foregroundStyle(DS.secondary)
-                }
-                ForEach(Array([("Alex", 24), ("Sam", 21), ("Jordan", 17), ("Taylor", 12)].enumerated()), id: \.offset) { index, driver in
-                    ChampionshipRow(rank: index + 1, name: driver.0, result: "\(driver.1)% improvement", detail: "", isCurrent: false)
-                }
             } else {
                 Surface {
                     Text("No league joined").font(DS.section)
                     Text("Create or join a league. 4 members needed to rank.").foregroundStyle(DS.secondary)
-                    QualificationMarks(memberCount: 0)
                 }
             }
-            Surface {
-                Text("Walking Tests and demo trips don’t count toward rankings.").font(.caption).foregroundStyle(DS.secondary)
+            if backend.league != nil {
+                DisclosureGroup("Manage league") { leagueActionLayout.padding(.top, 12) }
             }
-            BackendStatusView()
+            ConsumerBackendStatusView()
         }.navigationTitle("Leagues").navigationBarTitleDisplayMode(.inline)
             .refreshable { await backend.refreshLeague() }
             .task { if backend.identity != nil { await backend.refreshLeague() } }
+    }
+    private var leagueActionLayout: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { leagueActions }
+            VStack(spacing: 12) { leagueActions }
+        }
     }
     private var leagueActions: some View {
         Group {
@@ -130,15 +123,16 @@ struct LeagueFormView: View {
                         .onChange(of: invitation) { _, value in
                             if let invite = LeagueInvitation.parse(value) { leagueID = invite.id.uuidString; inviteCode = invite.code }
                         }
-                    Text("Or enter invite details:").font(.caption).foregroundStyle(DS.secondary)
+                    DisclosureGroup("Enter invite details manually") {
                     TextField("League ID", text: $leagueID).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("leagueUUID")
                     TextField("Invite code", text: $inviteCode).textInputAutocapitalization(.characters).autocorrectionDisabled().accessibilityIdentifier("leagueCode")
-                    Text("Both fields are required. Joining leaves your previous league.").font(.caption).foregroundStyle(DS.secondary)
+                    }
+                    Text("Joining leaves your previous league.").font(.caption).foregroundStyle(DS.secondary)
                     Button("Join League") { Task { await backend.joinLeague(id: leagueID, code: inviteCode) } }.accessibilityIdentifier("joinLeague")
                 }
             }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             if let league = backend.league { Text("Current league: \(league.name)").font(.headline).foregroundStyle(DS.mint) }
-            BackendStatusView()
+            ConsumerBackendStatusView()
         }.navigationTitle(creating ? "Create League" : "Join League").navigationBarTitleDisplayMode(.inline)
     }
 }

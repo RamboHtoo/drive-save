@@ -6,10 +6,19 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var crews: [Crew] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
-    private let store = TripStore()
+    private let store: TripStore
     private var localTrips: [Trip] = []
     let client: APIClient
-    init(client: APIClient = APIClient(mode: .mock)) { self.client = client }
+    init(client: APIClient = APIClient(mode: .mock), store: TripStore = TripStore()) {
+        self.client = client; self.store = store
+    }
+    func isLocalTrip(_ trip: Trip) -> Bool { localTrips.contains { $0.id == trip.id } }
+    func deleteLocalTrip(_ trip: Trip) throws {
+        guard isLocalTrip(trip) else { return }
+        try store.delete(id: trip.id)
+        localTrips.removeAll { $0.id == trip.id }
+        trips.removeAll { $0.id == trip.id }
+    }
     var drivingTrips: [Trip] { trips.drivingOnly }
     var crewCandidateTrips: [Trip] { trips.crewCandidates }
     var estimatedTrips: [Trip] { trips.filter { $0.hasEstimate } }

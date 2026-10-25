@@ -64,6 +64,39 @@ indirect enum JSONValue: Codable, Hashable {
 typealias VehicleRow = [String: JSONValue]
 
 struct APIUser: Codable { let user_id: UUID; let nickname: String; let token: String }
+/// GET /users/{user_id}/progress. Money is calculated exclusively by the server.
+struct APIProgress: Codable, Equatable {
+    let user_id: UUID
+    let trips_counted: Int
+    let baseline_trips_needed: Int
+    let baseline_waste_per_mile_usd: Double?
+    let current_waste_per_mile_usd: Double?
+    let improvement_pct: Double?
+    let est_savings_usd: Double
+    let weekly: [APIWeeklyPoint]
+    let is_estimate: Bool
+
+    var hasSavings: Bool {
+        trips_counted > 0 && baseline_trips_needed == 0 && baseline_waste_per_mile_usd != nil && current_waste_per_mile_usd != nil && improvement_pct != nil
+    }
+    var availability: String {
+        if trips_counted == 0 { return "No scored trips yet." }
+        if baseline_trips_needed > 0 { return "\(baseline_trips_needed) more scored \(baseline_trips_needed == 1 ? "trip" : "trips") to set your baseline." }
+        if baseline_waste_per_mile_usd == 0 { return "No savings baseline available." }
+        return "No weekly savings estimate yet."
+    }
+}
+struct APIWeeklyPoint: Codable, Equatable {
+    let week_start: String // A calendar date, not a timestamp.
+    let miles: Double
+    let waste_per_mile_usd: Double
+}
+
+extension Double {
+    /// Preserve server precision: many receipts are less than one cent.
+    var receiptDollars: String { formatted(.currency(code: "USD").precision(.fractionLength(2...4))) }
+}
+
 struct APIIdentity: Equatable { let userID: UUID; let nickname: String }
 struct APISpeedSample: Codable, Hashable {
     let ts: Date
@@ -140,6 +173,15 @@ struct APILeague: Codable, Identifiable {
     var canRank: Bool { active && member_count >= 4 }
 }
 struct APIStanding: Codable, Identifiable {
+    var state: String? = nil
+    var availability: String {
+        switch state {
+        case "zero_baseline": return "No baseline waste"
+        case "no_weekly_trips": return "No weekly trips"
+        case "ready": return "Ready"
+        default: return "Awaiting baseline"
+        }
+    }
     let rank: Int?
     let user_id: UUID
     let nickname: String

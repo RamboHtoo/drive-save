@@ -37,8 +37,14 @@ struct Trip: Identifiable, Codable, Hashable {
     var sharpTurns: Int { recording?.events.filter { $0.kind == .sharpTurn }.count ?? 0 }
     var eventCount: Int { harshBraking + rapidAcceleration + sharpTurns }
     var hasEstimate: Bool { isDriving && recording == nil && source == .simulated }
+    // Presentation only: a zero/unknown distance is not evidence of a completed drive.
+    var hasUsableDistance: Bool {
+        distanceMiles.isFinite && distanceMiles > 0 && recording?.distanceAvailable != false
+    }
+    var isIncompleteRecording: Bool { !hasEstimate && !hasUsableDistance }
     var distanceLabel: String {
-        if let recording, !recording.distanceAvailable { return "Unavailable" }
+        if !hasUsableDistance { return "Unavailable" }
+        if distanceMiles < 0.01 { return "<0.01 mi" }
         return String(format: "%.2f mi", distanceMiles)
     }
     var durationLabel: String {

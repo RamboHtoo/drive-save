@@ -116,6 +116,14 @@ actor BackendAPIClient {
         }
         return try APIJSON.decoder().decode(APITripCreated.self, from: await request("trips", method: "POST", body: data))
     }
+    func progress() async throws -> APIProgress {
+        guard let owner = try identity()?.userID else { throw BackendError.expiredSession }
+        guard case .remote = mode else { throw BackendError.invalidInput("Progress requires Online mode.") }
+        // A self-only URL must never be retried with a replacement user's identity.
+        let progress = try APIJSON.decoder().decode(APIProgress.self, from: await request("users/\(owner)/progress", method: "GET", recover: false))
+        guard progress.user_id == owner else { throw BackendError.invalidResponse }
+        return progress
+    }
     func receipt(tripID: UUID) async throws -> APIReceipt {
         if case .mock = mode {
             guard let found = mockUploads.values.first(where: { $0.1.trip_id == tripID }) else { throw BackendError.server(404, nil) }

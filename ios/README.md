@@ -132,3 +132,17 @@ Contract, fixtures, implementation notes, and test commands: [VehiclePicker.md](
 The result shows the **server-reported pricing vehicle**, estimated avoidable fuel cost, model name, numeric assumptions, sources, and notes. It never computes fuel costs locally or assumes the selected car is the pricing car. Unsupported profiles may produce a reference-car receipt, explicitly identified by the server. `trip_not_scored` produces a reason and no price; New Test fetches a fresh sample. Unsaved imports and offline mode cannot run this real-server action.
 
 Implementation, live-test scope, and commands: [TestCalculation.md](Docs/TestCalculation.md).
+
+## Live Home and demo readiness (2026-10-25)
+
+Online Home reads backend progress without sample-value fallback. Server receipts retain sub-cent precision and expand **How it’s calculated**; online leagues display actual individual readiness states. See [DemoReadiness.md](Docs/DemoReadiness.md) for verification, the four-phone rehearsal, and current scoring/accuracy limitations.
+
+## Consumer interface cleanup (2026-10-25)
+
+Everyday screens now focus on sign up, vehicle selection, driving, receipts, and individual league rankings. Developer controls are under **Profile → Developer Mode → Enable developer tools → Developer tools**; this replaces the earlier Advanced Settings paths documented above. **Test Calculation** is available there using the existing saved vehicle and isolated demo account. Walking Test, Demo Drive, sensor diagnostics, raw JSON, and technical notices are hidden during ordinary use. Home telemetry and the History sample chart were removed; normal online History hides sample/synthetic trips without changing local storage.
+
+See [ConsumerCleanup.md](Docs/ConsumerCleanup.md) for the full hidden/relocated inventory and verification scope.
+
+### Local recording cleanup
+
+The obsolete Contract Demo Replay control has been removed; **Test Calculation** remains the primary developer demo. Internal replay/API testing helpers remain intact. History labels recordings without usable distance **Incomplete recording**. Open a local recording to inspect it or choose **Delete local recording** and confirm **Delete from this iPhone**. This deletes only the saved local copy, with no API call, server deletion, or league ranking change. Missing mileage and prices remain unavailable. Details and regression commands are in [ConsumerCleanup.md](Docs/ConsumerCleanup.md).

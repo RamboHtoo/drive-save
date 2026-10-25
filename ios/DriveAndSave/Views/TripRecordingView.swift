@@ -4,6 +4,7 @@ struct TripRecordingView: View {
     @EnvironmentObject private var model: AppViewModel
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var recorder = TripRecordingService()
+    @AppStorage("developerMode") private var developerMode = false
     @State private var selectedMode: TripRecordingService.Mode = .device
     private var simulatorMode: Bool { selectedMode == .simulator }
     private var walkingMode: Bool { selectedMode == .walking }
@@ -14,9 +15,13 @@ struct TripRecordingView: View {
     @State private var pendingTrip: Trip?
     @State private var saveError: String?
     @State private var showDebug = false
+    private var savedRecordingDeleted: Bool { savedTrip.map { !model.isLocalTrip($0) } ?? false }
     var body: some View {
         Screen {
-            if let savedTrip {
+            if savedRecordingDeleted {
+                Label("Local recording deleted", systemImage: "trash").foregroundStyle(DS.secondary)
+                Text("Any uploaded receipt and league results are unchanged.").foregroundStyle(DS.secondary)
+            } else if let savedTrip {
                 Label("Trip saved on this iPhone", systemImage: "checkmark.circle.fill").foregroundStyle(DS.mint)
                 NavigationLink { TripReceiptView(trip: savedTrip) } label: {
                     Label("Open trip receipt", systemImage: "receipt").font(.headline).frame(maxWidth: .infinity).padding()
@@ -28,7 +33,7 @@ struct TripRecordingView: View {
                 setupContent
             }
         }
-        .navigationTitle(walkingMode ? "Walking Test" : savedTrip != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
+        .navigationTitle(savedRecordingDeleted ? "Recording deleted" : walkingMode ? "Walking Test" : savedTrip != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(began && savedTrip == nil)
         .onAppear { if !began { recorder.prepare(mode: selectedMode) } }
@@ -52,15 +57,17 @@ struct TripRecordingView: View {
 
     private var setupContent: some View {
         Group {
-            Picker("Recording mode", selection: $selectedMode) {
-                Text("Driving").tag(TripRecordingService.Mode.device)
-                Text("Walking Test").tag(TripRecordingService.Mode.walking)
-                Text("Demo Drive").tag(TripRecordingService.Mode.simulator)
-            }.pickerStyle(.segmented).accessibilityIdentifier("recordingMode")
-                .onChange(of: selectedMode) { _, _ in
-                    mountingConfirmed = false
-                    recorder.prepare(mode: selectedMode)
-                }
+            if developerMode {
+                Picker("Recording mode", selection: $selectedMode) {
+                    Text("Driving").tag(TripRecordingService.Mode.device)
+                    Text("Walking Test").tag(TripRecordingService.Mode.walking)
+                    Text("Demo Drive").tag(TripRecordingService.Mode.simulator)
+                }.pickerStyle(.segmented).accessibilityIdentifier("recordingMode")
+                    .onChange(of: selectedMode) { _, _ in
+                        mountingConfirmed = false
+                        recorder.prepare(mode: selectedMode)
+                    }
+            }
             Text(walkingMode ? "Walking GPS Test" : "Start Trip").font(.largeTitle.bold())
             Surface {
                 Label(walkingMode ? "GPS only" : "Only interact while parked", systemImage: walkingMode ? "figure.walk" : "checkmark.shield.fill").font(.headline).foregroundStyle(DS.mint)
@@ -86,7 +93,7 @@ struct TripRecordingView: View {
                     ProgressView(value: recorder.calibrationProgress).tint(DS.mint)
                     Button(recorder.isCalibrated ? "Recalibrate mount" : "Calibrate mounted phone") { recorder.calibrate() }
                         .disabled(!mountingConfirmed).buttonStyle(.bordered).accessibilityIdentifier("calibrate")
-                    Text(recorder.motionStatus).font(.caption).foregroundStyle(DS.secondary)
+                    if developerMode { Text(recorder.motionStatus).font(.caption).foregroundStyle(DS.secondary) }
                     Text("Without calibration, GPS trips save but driving events are unavailable.").font(.caption).foregroundStyle(DS.secondary)
                 }
             }
@@ -110,24 +117,26 @@ struct TripRecordingView: View {
                 Text(recorder.elapsedLabel).font(.system(size: 56, weight: .bold, design: .monospaced)).monospacedDigit().accessibilityIdentifier("elapsedTime")
                 HStack { Metric(value: recorder.distanceLabel, label: simulatorMode ? "simulated distance" : "GPS distance"); Metric(value: recorder.eventCountLabel, label: "driving events") }
                 Text(recorder.locationStatus).font(.caption).foregroundStyle(DS.secondary)
+                if developerMode {
                 Text("GPS accuracy: \(recorder.accuracyLabel)").font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("gpsAccuracy")
                 Text(recorder.calibrationLabel).font(.caption).foregroundStyle(DS.secondary)
                 Text(recorder.detectionStatus).font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("detectionStatus")
+                }
                 if recorder.measurementsIncomplete {
-                    Label("Measurements incomplete · see GPS and detection status above", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label("Measurements incomplete · some trip details may be unavailable", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 }
             }
             Text(walkingMode ? "Stop walking before reviewing or saving your Walking Test." : "Keep your attention on the road. Review details only after parking.").font(.headline).foregroundStyle(DS.secondary)
             if let interruption = recorder.interruption { Text(interruption).font(.subheadline).foregroundStyle(.orange) }
             Button(walkingMode ? "Stop & save Walking Test" : "Stop & save · I’m parked") { finish() }
                 .font(.headline).buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("stopTrip")
-            if !walkingMode {
-            DisclosureGroup("Advanced Settings") {
+            if developerMode && !walkingMode {
+            DisclosureGroup("Sensor diagnostics") {
                 Button("View live sensor measurements") { showDebug = true }.padding(.vertical)
                 Text("Open only while stationary. Readings do not measure fuel consumption.").font(.caption).foregroundStyle(DS.secondary)
             }
             }
-            if !walkingMode && !recorder.events.isEmpty {
+            if developerMode && !walkingMode && !recorder.events.isEmpty {
                 Surface {
                     Eyebrow(text: "Candidate events")
                     ForEach(recorder.events.suffix(5)) { event in

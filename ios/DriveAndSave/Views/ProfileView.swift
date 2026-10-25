@@ -18,14 +18,16 @@ struct WelcomeView: View {
                         .accessibilityIdentifier("welcomeNickname")
                         .onSubmit { editingNickname = false }
                     Text("1–32 characters · visible to your league.").font(.caption).foregroundStyle(DS.secondary)
-                    Toggle("Offline demo", isOn: $offline).accessibilityIdentifier("offlineOnboarding")
-                    Text(offline ? "This iPhone only · no multiplayer" : "Online · account saved on this iPhone")
-                        .font(.caption).foregroundStyle(DS.secondary)
-                    if !offline {
-                        DisclosureGroup("Advanced Settings") {
-                            Toggle("Demo account recovery", isOn: $allowRecovery)
-                            Text("Allow a replacement demo account after a server reset. Previous trips and league membership may be lost.").font(.caption).foregroundStyle(DS.secondary)
-                        }.font(.subheadline)
+                    DisclosureGroup("Developer options") {
+                        Toggle("Offline demo", isOn: $offline).accessibilityIdentifier("offlineOnboarding")
+                        Text(offline ? "This iPhone only · no multiplayer" : "Online · account saved on this iPhone")
+                            .font(.caption).foregroundStyle(DS.secondary)
+                        if !offline {
+                            DisclosureGroup("Account recovery") {
+                                Toggle("Demo account recovery", isOn: $allowRecovery)
+                                Text("Allow a replacement demo account after a server reset. Previous trips and league membership may be lost.").font(.caption).foregroundStyle(DS.secondary)
+                            }.font(.subheadline)
+                        }
                     }
                     Button(offline ? "Continue with offline demo" : "Join Drive Save") {
                         editingNickname = false
@@ -41,7 +43,7 @@ struct WelcomeView: View {
                     .disabled(nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nickname.trimmingCharacters(in: .whitespacesAndNewlines).count > 32 || backend.isBusy)
                 }
                 if backend.isBusy { ProgressView("Creating your profile…") }
-                if let error = backend.errorMessage { Text(error).font(.subheadline).foregroundStyle(.orange).textSelection(.enabled) }
+                if backend.errorMessage != nil { Text("We couldn’t create your profile. Check your connection and try again.").font(.subheadline).foregroundStyle(.orange) }
                 Text("Set up and review Drive Save only while safely stopped.").font(.footnote).foregroundStyle(DS.secondary)
             }
             .navigationTitle("Drive Save").navigationBarTitleDisplayMode(.inline)
@@ -52,10 +54,11 @@ struct WelcomeView: View {
 
 struct ProfileView: View {
     @EnvironmentObject private var backend: BackendViewModel
+    @AppStorage("developerMode") private var developerMode = false
     var body: some View {
         Screen {
             DisplayType(backend.identity?.nickname ?? "No account", size: 44).accessibilityIdentifier("profileNickname")
-            Text(backend.isRemote ? "Online" : "Offline demo · this iPhone only").font(DS.technical).foregroundStyle(DS.acid)
+            if !backend.isRemote { Text("Offline demo · this iPhone only").font(.caption).foregroundStyle(DS.secondary) }
             Surface {
                 Eyebrow(text: "League")
                 if let league = backend.league {
@@ -63,19 +66,28 @@ struct ProfileView: View {
                     Text("\(league.member_count) \(league.member_count == 1 ? "member" : "members") · \(league.canRank ? "Ranked" : "4 needed to rank")").foregroundStyle(DS.secondary)
                     LeagueInviteActions(league: league)
                 } else { Text("No league joined").foregroundStyle(DS.secondary) }
-                Button("Refresh membership") { Task { await backend.refreshLeague() } }.disabled(backend.isBusy)
+
             }
             Surface {
                 Eyebrow(text: "My Vehicle")
                 if let row = backend.vehicle {
                     Text(row.vehicleTitle).font(.headline).accessibilityIdentifier("profileVehicleTitle")
+                    if let vehicle = try? CatalogVehicle(row: row), let mpg = vehicle.details.mpg.combined {
+                        Text("\(mpg.formatted()) MPG combined").font(.subheadline).foregroundStyle(DS.secondary)
+                    }
                     if !backend.vehicleConfirmed { Text("Example · unconfirmed").font(.caption).foregroundStyle(DS.secondary) }
                     if row["supported"] == .bool(false) { Text("Fuel estimates unavailable").font(.caption).foregroundStyle(.orange) }
                 } else { Text("No vehicle selected").foregroundStyle(DS.secondary) }
                 NavigationLink("My Vehicle") { MyVehicleView() }.accessibilityIdentifier("myVehicle")
             }
-            NavigationLink("Advanced Settings") { APISettingsView() }.accessibilityIdentifier("openAdvancedSettings")
-            BackendStatusView()
+            Surface {
+                Eyebrow(text: "Developer Mode")
+                Toggle("Enable developer tools", isOn: $developerMode).accessibilityIdentifier("developerMode")
+                if developerMode {
+                    NavigationLink("Developer tools") { APISettingsView() }.accessibilityIdentifier("openAdvancedSettings")
+                    Text("Demo calculations, connection settings, and recording tests.").font(.caption).foregroundStyle(DS.secondary)
+                }
+            }
         }
         .navigationTitle("Profile").navigationBarTitleDisplayMode(.inline)
         .task { await backend.refreshLeague(); await backend.refreshMyVehicle() }
@@ -110,8 +122,7 @@ struct LeagueInviteActions: View {
     @State private var copied = false
     private var invitation: String { "Join my Drive Save league: \(league.name)\nLeague ID: \(league.crew_id.uuidString)\nInvite code: \(league.join_code ?? "")" }
     var body: some View {
-        if let code = league.join_code {
-            Text("Invite code: \(code)").font(.headline).textSelection(.enabled)
+        if league.join_code != nil {
             ViewThatFits(in: .horizontal) {
                 HStack { inviteButtons }
                 VStack(alignment: .leading) { inviteButtons }
@@ -121,7 +132,7 @@ struct LeagueInviteActions: View {
     private var inviteButtons: some View {
         Group {
             Button(copied ? "Invite copied" : "Copy invite") { UIPasteboard.general.string = invitation; copied = true }
-            ShareLink(item: invitation) { Label("Share invite", systemImage: "square.and.arrow.up") }
+            ShareLink(item: invitation) { Label("Invite", systemImage: "square.and.arrow.up") }
         }
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MyVehicleView: View {
+    var developerTools = false
     @EnvironmentObject private var backend: BackendViewModel
     @State private var showCalculation = false
     @State private var calculation: (id: UUID, vehicle: VehicleRow, service: TestCalculationService)?
@@ -11,25 +12,27 @@ struct MyVehicleView: View {
                 if let vehicle = try? CatalogVehicle(row: row) { VehicleSummary(vehicle: vehicle) }
                 else {
                     DisplayType(row.vehicleTitle.isEmpty ? "Imported vehicle" : row.vehicleTitle, size: 40)
-                    Text("Imported profile · catalog eligibility unverified").foregroundStyle(DS.secondary)
+                    Text("Vehicle details unavailable").foregroundStyle(DS.secondary)
                 }
             } else if backend.isBusy { ProgressView("Loading vehicle…") }
             else { Text("No vehicle selected").font(DS.section) }
             NavigationLink(backend.vehicle == nil ? "Choose vehicle" : "Change vehicle") { VehiclePickerView() }
                 .buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("chooseVehicle")
-            Button("Test Calculation") {
-                do {
-                    guard let row = backend.vehicle else { return }
-                    calculation = (UUID(), row, try backend.calculationService()); calculationError = nil; showCalculation = true
-                } catch { calculationError = error.localizedDescription }
-            }.buttonStyle(.bordered).accessibilityIdentifier("testCalculation")
-                .disabled(!backend.canTestCalculation || backend.isBusy)
-            if backend.isRemote, backend.vehicle != nil, !backend.canTestCalculation {
-                Text("Save or upload this vehicle before testing.").font(.caption).foregroundStyle(DS.secondary)
+            if developerTools {
+                Button("Test Calculation") {
+                    do {
+                        guard let row = backend.vehicle else { return }
+                        calculation = (UUID(), row, try backend.calculationService()); calculationError = nil; showCalculation = true
+                    } catch { calculationError = error.localizedDescription }
+                }.buttonStyle(.bordered).accessibilityIdentifier("testCalculation")
+                    .disabled(!backend.canTestCalculation || backend.isBusy)
+                if backend.isRemote, backend.vehicle != nil, !backend.canTestCalculation {
+                    Text("Save or upload this vehicle before testing.").font(.caption).foregroundStyle(DS.secondary)
+                }
+                if let calculationError { Text(calculationError).foregroundStyle(.orange) }
+                if !backend.isRemote { Text("Offline demo · sample catalog. Calculation tests require online mode.").font(.caption).foregroundStyle(DS.secondary) }
             }
-            if let calculationError { Text(calculationError).foregroundStyle(.orange) }
-            if !backend.isRemote { Text("Offline demo · sample catalog. Calculation tests require online mode.").font(.caption).foregroundStyle(DS.secondary) }
-            if let error = backend.errorMessage { Text(error).font(.subheadline).foregroundStyle(.orange) }
+            if backend.errorMessage != nil { Text("Vehicle details couldn’t be refreshed. Try again.").font(.subheadline).foregroundStyle(.orange) }
         }
         .navigationTitle("My Vehicle").navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showCalculation) {
@@ -56,8 +59,8 @@ struct VehiclePickerView: View {
                 selectionButton("Year", value: picker.year.map(String.init), step: .year).disabled(picker.model == nil)
             }
             if picker.isLoading { ProgressView("Loading details…") }
-            if let error = picker.error {
-                Text(error).foregroundStyle(.orange)
+            if picker.error != nil {
+                Text("Vehicle details are unavailable. Please try again.").foregroundStyle(.orange)
                 Button("Retry") { Task { await loadDetails() } }
             }
             if let vehicle = picker.vehicle {
@@ -72,7 +75,7 @@ struct VehiclePickerView: View {
                 }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("saveCatalogVehicle")
                     .disabled(backend.isBusy)
             }
-            if let saveError { Text(saveError).foregroundStyle(.orange) }
+            if saveError != nil { Text("Your vehicle couldn’t be saved. Please try again.").foregroundStyle(.orange) }
         }
         .disabled(saving)
         .navigationTitle("Choose vehicle").navigationBarTitleDisplayMode(.inline)
@@ -133,8 +136,8 @@ private struct VehicleSelectionView: View {
             .searchable(text: $query, prompt: "Search \(step.rawValue.lowercased())")
             .overlay {
                 if loading { ProgressView("Loading…") }
-                else if let error {
-                    VStack(spacing: 16) { Text(error).foregroundStyle(.orange); Button("Retry") { Task { await load() } } }.padding(24)
+                else if error != nil {
+                    VStack(spacing: 16) { Text("Vehicle details are unavailable. Please try again.").foregroundStyle(.orange); Button("Retry") { Task { await load() } } }.padding(24)
                 } else if filtered.isEmpty {
                     ContentUnavailableView(query.isEmpty ? "No \(step.rawValue.lowercased())s available" : "No results", systemImage: "magnifyingglass", description: Text(query.isEmpty ? "Try again later or choose another vehicle." : "Try a different search."))
                 }
@@ -168,7 +171,7 @@ struct VehicleSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             DisplayType(vehicle.title, size: 40).accessibilityIdentifier("selectedVehicleTitle")
-            Text(vehicle.supportsFuelModel ? "Catalog supported · pricing is experimental" : "Fuel estimates unavailable for this vehicle")
+            Text(vehicle.supportsFuelModel ? "EPA fuel economy estimates" : "Fuel estimates unavailable for this vehicle")
                 .font(.subheadline).foregroundStyle(vehicle.supportsFuelModel ? DS.secondary : .orange)
                 .accessibilityIdentifier("vehicleEligibility")
             if details.mpg.combined != nil || details.mpg.city != nil || details.mpg.highway != nil {
@@ -188,14 +191,9 @@ struct VehicleSummary: View {
                 if let power = details.specs.rated_horsepower { ReceiptLedgerLine(label: "Power", value: "\(power.formatted()) hp") }
                 if let transmission = details.specs.transmission { ReceiptLedgerLine(label: "Transmission", value: transmission) }
                 if let drive = details.specs.drive { ReceiptLedgerLine(label: "Drive", value: drive) }
-                if let weight = details.specs.test_weight_lb { ReceiptLedgerLine(label: "Test weight", value: "\(weight.formatted()) lb") }
-                Text("\(details.source.dataset) · typical tested configuration").font(.caption).foregroundStyle(DS.secondary)
+
             }
-            if !details.flags.isEmpty {
-                DisclosureGroup("Catalog notes") {
-                    ForEach(details.flags, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption).foregroundStyle(DS.secondary) }
-                }
-            }
+
         }
     }
 }

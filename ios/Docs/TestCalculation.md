@@ -80,7 +80,7 @@ Routine offline test commands exclude this class. The UI flow checks the saved-c
 1. Run the signed app on your iPhone and sign in online.
 2. Profile → My Vehicle: choose and save your actual catalog vehicle.
 3. Tap Test Calculation. Keep the app open while the backend sample and receipt load.
-4. Verify Synthetic / Demo, selected car, **Vehicle used for pricing**, amount, model, and Pricing assumptions. A reference car returned by the server must never be presented as your selected car.
+4. Verify Synthetic / Demo, selected car, **Vehicle used for pricing**, amount, model, and How it’s calculated. A reference car returned by the server must never be presented as your selected car.
 5. Tap New Test for a fresh calculation. For a connection error, Retry keeps the previous test UUID and data.
 6. Return to Profile/History/Leagues: the driver's identity and car remain, and no synthetic calculation is added to driving history or real standings.
 

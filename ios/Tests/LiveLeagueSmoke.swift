@@ -33,6 +33,8 @@ private final class LeagueTestCredentials: CredentialStore {
         for index in clients.indices {
             let restored = BackendAPIClient(mode: .remote(base), credentialStore: stores[index])
             try check(try await restored.identity() == identities[index], "driver \(index + 1) restores the same identity without re-registering")
+            let progress = try await restored.progress()
+            try check(progress.user_id == identities[index].userID && progress.trips_counted == 0 && !progress.hasSavings, "driver \(index + 1) reads real empty progress under their own identity")
             let loaded = try await restored.league(id: league.crew_id)
             try check(loaded.member_count == 4 && loaded.canRank && Set(loaded.members.map(\.user_id)) == Set(identities.map(\.userID)), "driver \(index + 1) reads all four named members in the shared league")
             let board = try await restored.leaderboard(id: league.crew_id)

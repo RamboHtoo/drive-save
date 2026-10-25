@@ -15,7 +15,13 @@ final class LiveCalculationTests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 10))
         name.tap(); name.typeText("Calculation QA " + String(UUID().uuidString.prefix(6)) + "\n")
         app.buttons["welcomeRegister"].tap()
-        XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 30)); app.buttons["openProfile"].tap()
+        XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["progressEmptyState"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["homeFinancialValue"].label, "—")
+        XCTAssertEqual(app.staticTexts["progressEmptyState"].label, "No scored trips yet.")
+        XCTAssertFalse(app.staticTexts["DEMO · SIMULATED DATA"].exists)
+        let home = XCTAttachment(screenshot: app.screenshot()); home.name = "Online Home empty progress"; home.lifetime = .keepAlways; add(home)
+        app.buttons["openProfile"].tap()
         app.scrollFullyIntoView(app.buttons["myVehicle"]); app.buttons["myVehicle"].tap()
         app.buttons["chooseVehicle"].tap()
         app.buttons["selectVehicleBrand"].tap()
@@ -36,6 +42,10 @@ final class LiveCalculationTests: XCTestCase {
         XCTAssertTrue(app.buttons["saveCatalogVehicle"].waitForExistence(timeout: 30))
         app.scrollFullyIntoView(app.buttons["saveCatalogVehicle"]); app.buttons["saveCatalogVehicle"].tap()
         XCTAssertTrue(app.navigationBars["My Vehicle"].waitForExistence(timeout: 30))
+        app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch.tap()
+        app.openAdvancedSettings()
+        let calculation = app.buttons["developerCalculation"]
+        app.scrollFullyIntoView(calculation); calculation.tap()
         let test = app.buttons["testCalculation"]
         app.scrollFullyIntoView(test)
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: test)
@@ -58,12 +68,16 @@ final class LiveCalculationTests: XCTestCase {
         XCTAssertFalse(app.buttons["nav-Home"].exists)
         app.scrollFullyIntoView(vehicle)
         let receipt = XCTAttachment(screenshot: app.screenshot()); receipt.name = "Live synthetic calculation receipt"; receipt.lifetime = .keepAlways; add(receipt)
-        let assumptions = app.buttons["Pricing assumptions"]
+        let assumptions = app.buttons["How it’s calculated"]
         app.scrollFullyIntoView(assumptions); assumptions.tap()
         let assumption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Marginal Wheel Efficiency:")).firstMatch
         XCTAssertTrue(assumption.waitForExistence(timeout: 5))
         // Driver's own identity/selection still exist; test results are outside local driving history.
-        app.openMain("Home"); app.buttons["openProfile"].tap()
+        app.openMain("Home")
+        XCTAssertTrue(app.staticTexts["progressEmptyState"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["homeFinancialValue"].label, "—", "Isolated synthetic calculations must not affect driver savings")
+        XCTAssertEqual(app.staticTexts["progressEmptyState"].label, "No scored trips yet.")
+        app.buttons["openProfile"].tap()
         XCTAssertTrue(app.staticTexts["profileNickname"].label.hasPrefix("Calculation QA"))
         XCTAssertEqual(app.staticTexts["profileVehicleTitle"].label, "2020 Toyota CAMRY")
     }

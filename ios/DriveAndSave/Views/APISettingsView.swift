@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct APISettingsView: View {
     @EnvironmentObject private var backend: BackendViewModel
+    @EnvironmentObject private var model: AppViewModel
     @State private var remote = false
     @State private var baseURL = "https://drivesave.nuhylabs.com"
     @State private var vehicleJSON = ""
@@ -10,6 +11,15 @@ struct APISettingsView: View {
     @State private var importing = false
     var body: some View {
         Screen {
+            NavigationLink("Test Calculation") { MyVehicleView(developerTools: true) }.accessibilityIdentifier("developerCalculation")
+            NavigationLink("Recording tests") { TripRecordingView() }
+            NavigationLink("History & receipt diagnostics") {
+                Screen {
+                    ForEach(model.trips) { trip in
+                        NavigationLink(trip.displayTitle) { TripReceiptAdvancedView(trip: trip) }
+                    }
+                }.navigationTitle("Trip diagnostics")
+            }
             Surface {
                 Eyebrow(text: "API connection")
                 Toggle("Use remote backend", isOn: $remote)
@@ -40,15 +50,9 @@ struct APISettingsView: View {
                     Button("Fetch server vehicle") { Task { await backend.fetchVehicle(); loadSelectedVehicle() } }
                 }.buttonStyle(.bordered)
             }
-            Surface {
-                Eyebrow(text: "Contract demo replay")
-                Text("Uploads the backend's sample trip as source=replayed and is_demo=true. Requires registration and a vehicle. It uses a separate replay identity that cannot join leagues; it never uploads under your competition identity.").font(.subheadline).foregroundStyle(DS.secondary)
-                Button("Upload / retry demo replay") { Task { await backend.replayContractFixture() } }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("uploadReplay")
-                if let receipt = backend.replayReceipt { BackendReceiptCard(receipt: receipt, mock: !backend.isRemote) }
-            }
             BackendStatusView()
         }
-        .navigationTitle("Advanced Settings").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Developer tools").navigationBarTitleDisplayMode(.inline)
         .disabled(backend.isBusy)
         .onAppear { remote = backend.isRemote; baseURL = backend.connectionURL; loadSelectedVehicle() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
@@ -75,20 +79,32 @@ struct BackendStatusView: View {
     }
 }
 
+/// Normal screens retain actionable failures without exposing server diagnostics.
+struct ConsumerBackendStatusView: View {
+    @EnvironmentObject private var backend: BackendViewModel
+    var body: some View {
+        if backend.isBusy { ProgressView("Updating…") }
+        if backend.errorMessage != nil { Text("We couldn’t complete that request. Check your connection and try again.").font(.subheadline).foregroundStyle(.orange) }
+    }
+}
+
 struct TripUploadSection: View {
     let trip: Trip
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Surface {
-            Eyebrow(text: "Receipt")
-            if let reason = backend.unsupportedReason(for: trip) {
-                Text(reason).font(.subheadline).foregroundStyle(DS.secondary)
+            if backend.unsupportedReason(for: trip) != nil {
+                Text("Insufficient trip data for a fuel estimate.").font(.subheadline).foregroundStyle(DS.secondary)
+            } else if backend.vehicle?["supported"] == .bool(false) || backend.vehicle.flatMap({ try? CatalogVehicle(row: $0) })?.supportsFuelModel == false {
+                Text("Fuel estimates are unavailable for this vehicle.").font(.subheadline).foregroundStyle(DS.secondary)
+                NavigationLink("My Vehicle") { MyVehicleView() }
+            } else if backend.vehicle == nil || !backend.vehicleConfirmed {
+                Text("Select your vehicle to request an estimate.").font(.subheadline).foregroundStyle(DS.secondary)
+                NavigationLink("My Vehicle") { MyVehicleView() }
             } else {
-                Text(trip.source == .simulated ? "Demo replay upload · excluded from real competition" : "Recorded sensor trip · detector accuracy remains unvalidated").font(.caption).foregroundStyle(DS.secondary)
-                Button("Upload trip") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
+                Button("Get estimate") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             }
-            NavigationLink("My Vehicle") { MyVehicleView() }
-            BackendStatusView()
+            ConsumerBackendStatusView()
         }
     }
 }

@@ -2,27 +2,42 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject private var model: AppViewModel
+    @EnvironmentObject private var backend: BackendViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
-    private var latestTrace: Trip? { model.drivingTrips.first { !($0.recording?.speedSamples ?? []).isEmpty } }
     var body: some View {
         Screen {
             VStack(alignment: .leading, spacing: 10) {
-                Eyebrow(text: "Avoidable fuel cost").accessibilityAddTraits(.isHeader).accessibilityIdentifier("homeHeadline")
-                FinancialNumber(value: model.estimatedTrips.isEmpty ? "—" : model.avoidableCost.dollars).accessibilityIdentifier("homeFinancialValue")
-                if model.estimatedTrips.isEmpty {
-                    Text("No priced trips yet.").font(.subheadline).foregroundStyle(DS.secondary)
+                if backend.isRemote {
+                    Eyebrow(text: "Estimated savings · this week").accessibilityAddTraits(.isHeader).accessibilityIdentifier("homeHeadline")
+                    FinancialNumber(value: backend.progress.flatMap { $0.hasSavings ? $0.est_savings_usd.receiptDollars : nil } ?? "—").accessibilityIdentifier("homeFinancialValue")
+                    Text("Experimental estimate").font(.caption).foregroundStyle(DS.secondary)
+                    if backend.progressError != nil {
+                        Text("Progress unavailable").font(.headline)
+                        Text("Check your connection and try again.").font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("progressError")
+                        Button("Retry") { Task { await backend.refreshProgress() } }
+                    } else if let progress = backend.progress {
+                        if !progress.hasSavings {
+                            Text(progress.availability).font(.subheadline).foregroundStyle(DS.secondary).accessibilityIdentifier("progressEmptyState")
+                        }
+                    } else if backend.isRefreshingProgress {
+                        ProgressView("Loading progress…")
+                    }
                 } else {
+                    Eyebrow(text: "Offline demo · fuel cost").accessibilityAddTraits(.isHeader).accessibilityIdentifier("homeHeadline")
+                    FinancialNumber(value: model.estimatedTrips.isEmpty ? "—" : model.avoidableCost.dollars).accessibilityIdentifier("homeFinancialValue")
                     DemoNotice()
-                    Text("Sample estimate · not measured waste or savings.").font(.subheadline).foregroundStyle(DS.secondary)
+                    Text(model.estimatedTrips.isEmpty ? "No priced trips yet." : "Sample estimate · not measured waste or savings.").font(.subheadline).foregroundStyle(DS.secondary)
                 }
             }
             NavigationLink { TripRecordingView() } label: {
-                HStack { Text("Start Trip"); Spacer(); Text("↗").font(.title2) }
+                HStack { Text("Start Drive"); Spacer(); Text("↗").font(.title2) }
             }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("startTrip")
-            MeasurementRule()
-            TelemetryGraphic(trip: latestTrace)
             Text("Set up and review trips only when safely parked.").font(.footnote).foregroundStyle(DS.secondary)
         }
+        .task(id: backend.progressContext) { await backend.refreshProgress() }
+        .refreshable { await backend.refreshProgress() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await backend.refreshProgress() } } }
         .safeAreaInset(edge: .top, spacing: 0) { masthead }
         .navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar)
     }

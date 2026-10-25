@@ -159,6 +159,46 @@ final class BackendStub: URLProtocol {
         let sharedInvite = "Join my Drive Save league: Friends\nLeague ID: \(userID.uuidString)\nInvite code: DEMO42"
         try check(LeagueInvitation.parse(sharedInvite)?.id == userID && LeagueInvitation.parse(sharedInvite)?.code == "DEMO42", "shared invitation resolves exact league ID and code")
         try check(LeagueInvitation.parse("DEMO42") == nil, "code-only invite is not fabricated into a league ID")
+        // Live progress uses the authenticated driver's endpoint, never the legacy demo snapshot.
+        let progressStore = MemoryCredentialStore()
+        let progressID = UUID()
+        try progressStore.save(.init(userID: progressID, nickname: "Progress QA", token: "progress-unit-token", isDemoAccount: false))
+        let progressClient = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: progressStore)
+        func progressData(count: Int = 0, needed: Int = 3, baseline: Double? = nil, current: Double? = nil, improvement: Double? = nil, savings: Double = 0, owner: UUID? = nil) throws -> Data {
+            try APIJSON.encoder().encode(APIProgress(user_id: owner ?? progressID, trips_counted: count, baseline_trips_needed: needed, baseline_waste_per_mile_usd: baseline, current_waste_per_mile_usd: current, improvement_pct: improvement, est_savings_usd: savings, weekly: [], is_estimate: true))
+        }
+        BackendStub.handler = { request in
+            guard request.httpMethod == "GET", request.url?.path.lowercased() == "/users/\(progressID)/progress".lowercased(), request.url?.query == nil,
+                  request.value(forHTTPHeaderField: "Authorization") == "Bearer progress-unit-token" else { throw BackendError.invalidResponse }
+            return (200, try progressData())
+        }
+        let empty = try await progressClient.progress()
+        try check(empty.user_id == progressID && !empty.hasSavings && empty.availability == "No scored trips yet.", "progress uses exact self-only endpoint with Bearer auth and a clean empty state")
+        let baseline = try APIJSON.decoder().decode(APIProgress.self, from: progressData(count: 1, needed: 2))
+        try check(!baseline.hasSavings && baseline.availability.contains("2 more scored trips"), "baseline collection never presents a zero-dollar savings claim")
+        let ready = try APIJSON.decoder().decode(APIProgress.self, from: progressData(count: 4, needed: 0, baseline: 0.02, current: 0.03, improvement: -50, savings: -0.0624))
+        try check(ready.hasSavings && ready.est_savings_usd == -0.0624 && ready.est_savings_usd.receiptDollars.contains("0.0624"), "signed server savings retain negative values and sub-cent precision")
+        let noWeekly = try APIJSON.decoder().decode(APIProgress.self, from: progressData(count: 3, needed: 0, baseline: 0.02))
+        try check(!noWeekly.hasSavings && noWeekly.availability == "No weekly savings estimate yet.", "completed baseline without weekly results stays unpriced")
+        let zeroBaseline = try APIJSON.decoder().decode(APIProgress.self, from: progressData(count: 4, needed: 0, baseline: 0, current: 0.01))
+        try check(!zeroBaseline.hasSavings, "zero-baseline server state is not misrepresented as ready savings")
+        let readyZero = try APIJSON.decoder().decode(APIProgress.self, from: progressData(count: 4, needed: 0, baseline: 0.02, current: 0.02, improvement: 0))
+        try check(readyZero.hasSavings, "a genuine ready zero-dollar result remains displayable")
+        BackendStub.handler = { _ in (200, try progressData(owner: UUID())) }
+        do { _ = try await progressClient.progress(); throw BackendError.invalidInput("Expected owner mismatch rejection") }
+        catch BackendError.invalidResponse { try check(true, "another user's progress cannot be displayed") }
+        BackendStub.handler = { _ in (401, Data()) }
+        do { _ = try await progressClient.progress(); throw BackendError.invalidInput("Expected expired progress session") }
+        catch BackendError.expiredSession { try check(progressStore.credential?.userID == progressID, "progress 401 preserves the driver identity for explicit recovery") }
+        BackendStub.handler = { _ in throw URLError(.notConnectedToInternet) }
+        do { _ = try await progressClient.progress(); throw BackendError.invalidInput("Expected progress network failure") }
+        catch let error as URLError { try check(error.code == .notConnectedToInternet, "progress network failures propagate without mock fallback") }
+        let updatedStandingData = Data("{\"rank\":null,\"user_id\":\"\(progressID)\",\"nickname\":\"QA\",\"improvement_pct\":null,\"est_savings_usd\":0,\"trips_counted\":0,\"state\":\"no_weekly_trips\"}".utf8)
+        let waiting = try APIJSON.decoder().decode(APIStanding.self, from: updatedStandingData)
+        try check(waiting.availability == "No weekly trips" && waiting.rank == nil, "individual standings display the returned readiness state without invented ranks")
+        BackendStub.handler = { _ in (409, Data("{\"error\":{\"code\":\"trip_not_scored\",\"message\":\"event_recording_incomplete\"}}".utf8)) }
+        do { _ = try await progressClient.receipt(tripID: UUID()); throw BackendError.invalidInput("Expected unscored receipt") }
+        catch let error as BackendError { try check(error.localizedDescription.contains("No estimate was produced") && error.localizedDescription.contains("event_recording_incomplete"), "unscored receipts retain the actual server reason without a fallback amount") }
         print("\(passes) backend contract checks passed.")
     }
 }
