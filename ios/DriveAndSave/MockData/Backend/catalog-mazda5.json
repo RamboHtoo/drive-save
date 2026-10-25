@@ -1,0 +1,82 @@
+{
+  "vehicle_id": "5b8e5fb7-8fe8-55a2-b24a-89ddb8ef6992",
+  "make": "Mazda",
+  "model": "MAZDA5",
+  "year": 2012,
+  "supported": true,
+  "specs": {
+    "fuel_type": "gasoline",
+    "vehicle_type": "Car",
+    "engine_displacement_l": 2.5,
+    "cylinders": 4,
+    "rated_horsepower": 157.0,
+    "transmission": "Semi-Automatic",
+    "gears": 5,
+    "drive": "2-Wheel Drive, Front",
+    "test_weight_lb": 3750.0
+  },
+  "mpg": {
+    "city": 22.1,
+    "highway": 29.7,
+    "combined": 25.0,
+    "is_estimate": true
+  },
+  "parameters": [
+    {
+      "key": "marginal_wheel_efficiency",
+      "value": 0.308408,
+      "unit": "fraction",
+      "method": "Fitted so the model's fuel equation comes closest to this car's hot-start city (UDDS) and highway (HWFET) lab results",
+      "is_estimate": true
+    },
+    {
+      "key": "idle_rate",
+      "value": 0.25,
+      "unit": "US-gal/hour",
+      "method": "The model's 0.25 gal/h for its 2.5 L Mazda5, scaled by this car's displacement",
+      "is_estimate": true
+    },
+    {
+      "key": "coast_deceleration",
+      "value": 0.049491,
+      "unit": "g",
+      "method": "Road load at 30 mph plus engine braking scaled by displacement x N/V ratio, set so the model's 2012 Mazda5 keeps 0.05 g",
+      "is_estimate": true
+    },
+    {
+      "key": "enrichment_start_fraction",
+      "value": 0.5,
+      "unit": "rated power fraction",
+      "method": "The model's value; it applies to this car's own rated horsepower",
+      "is_estimate": true
+    },
+    {
+      "key": "enrichment_max",
+      "value": 0.15,
+      "unit": "fraction",
+      "method": "The model's value; it applies to this car's own rated horsepower",
+      "is_estimate": true
+    },
+    {
+      "key": "drivetrain_factor",
+      "value": 0.9,
+      "unit": "fraction",
+      "method": "Assumed for front-wheel drive",
+      "is_estimate": true
+    },
+    {
+      "key": "fuel_energy",
+      "value": 121320000.0,
+      "unit": "J/US-gal",
+      "method": "Gasoline-equivalent gallon, as in the model",
+      "is_estimate": true
+    }
+  ],
+  "flags": [],
+  "source": {
+    "dataset": "EPA Test Car List",
+    "test_vehicle_id": "2ECL5XS1-001",
+    "test_configuration": 0,
+    "configurations_tested": 3
+  }
+}
