@@ -23,7 +23,7 @@ FROM timescaledb_information.jobs
 WHERE proc_name = 'policy_refresh_continuous_aggregate';
 
 -- Some editors display only the last result. This combines the setup checks.
--- Expected: 1, 3, true, true.
+-- Expected: 4, 3, followed by true flags.
 SELECT
   (SELECT max(version) FROM public.schema_versions) AS schema_version,
   (SELECT count(*) FROM timescaledb_information.hypertables
@@ -33,4 +33,12 @@ SELECT
     WHERE view_schema = 'public' AND view_name = 'daily_user_metrics'
       AND NOT materialized_only) AS real_time_aggregate_enabled,
   EXISTS (SELECT 1 FROM timescaledb_information.jobs
-    WHERE proc_name = 'policy_refresh_continuous_aggregate' AND scheduled) AS refresh_scheduled;
+    WHERE proc_name = 'policy_refresh_continuous_aggregate' AND scheduled) AS refresh_scheduled,
+  to_regclass('public.leagues') IS NOT NULL AS leagues_ready,
+  to_regprocedure('public.drive_save_leaderboard(uuid,timestamp with time zone,boolean)') IS NOT NULL AS individual_leaderboard_ready,
+  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='trips' AND column_name='model_result') AS model_receipts_ready,
+  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='trip_events' AND column_name='duration_s') AS event_duration_ready,
+  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='trips' AND column_name='events_complete') AS detector_coverage_ready;

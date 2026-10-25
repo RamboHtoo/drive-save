@@ -73,3 +73,9 @@ venv/
 .env.*
 !.env.example
 *-credentials.txt
+
+# Python estimator and local reports
+*.egg-info/
+build/
+dist/
+outputs/
