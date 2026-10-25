@@ -1,10 +1,12 @@
-# Mazda5 fuel-cost estimator
+# Fuel-cost estimator for supported vehicles
 
-This offline Python library implements the Notion scenario model for the **2012
-Mazda5 2.5L, five-speed automatic, FWD, regular gasoline**. It accepts phone-format
-speed recordings and motion events. The repository contains no iOS application or
-HTTP server; Person 1 records/detects, Person 2 authenticates/uploads, and this
-library calculates the post-trip receipt.
+This offline Python library implements the Notion scenario equations, originally
+built for the **2012 Mazda5 2.5L, five-speed automatic, FWD, regular gasoline**.
+It now prices other supported vehicle models using their own EPA-derived profiles
+and parameters. It accepts phone-format speed recordings and motion events and
+calculates the post-trip receipt. The HTTP backend in `backend/` selects the
+driver's vehicle, supplies its fuel price and configuration, and stores the results.
+See [vehicle-catalog.md](vehicle-catalog.md) for how vehicles and parameters are selected.
 
 Fuel costs and savings are experimental, not measured fuel flow. All results stay
 in demo leagues, including real recordings (`source=recorded`, `is_demo=true`).
@@ -34,7 +36,7 @@ and four-player demo use synthetic data, not actual phone recordings. EPA speed
 replays (`example --cycle hwfet`, `udds`, `us06`) have no IMU events and deliberately
 fail competition eligibility until a complete detector recording exists.
 
-## Sources and identity
+## Reference vehicle sources and identity
 
 - FuelEconomy.gov vehicle **31284** supplies identity and label MPG: 21 city, 28
   highway, 24 combined. Cached original response: `fueleconomy_31284.json`.
@@ -50,19 +52,58 @@ fail competition eligibility until a complete detector recording exists.
   identity and therefore the baseline. Review source changes before rollout.
 
 Test weight is an operating-mass assumption, not the actual loaded car's weight.
-The profile is for the US configuration. Other engines, markets, transmissions,
-hybrids and electric vehicles are unsupported; there is no default-car fallback.
+These cached sources describe the US Mazda5 reference configuration. The CLI
+profile, examples, demo and validation still use that reference car.
 
-Another car can be priced when the backend supplies its profile with a
-`parameters` object holding all seven keys of `physics.DEFAULT_PARAMETERS`
-(efficiency, idle rate, coast deceleration, enrichment start and maximum,
-drivetrain factor, fuel energy), worked out from the car's EPA tests
-([vehicle-catalog.md](vehicle-catalog.md)). Pass the same profile to
-`scoring_config(..., vehicle_profile=profile)`; the configuration then lists
-the car's values as its assumptions. A profile with `"fuel_type": "diesel"`
-lists its price as `diesel_price` instead of `gas_price`; pass the diesel price.
-A profile without `parameters`, like the Mazda5's, keeps the Notion values, and
-its results and configuration are unchanged.
+## Other vehicle models
+
+The backend's EPA vehicle catalog supplies mass, rated horsepower, road-load
+coefficients, estimated city/highway label MPG and a `parameters` object. Each
+non-reference profile must contain exactly these seven parameter keys:
+
+| Parameter | Unit | Mazda5 reference value |
+| --- | --- | --- |
+| `marginal_wheel_efficiency` | fraction | 0.30 |
+| `idle_rate` | US gal/hour | 0.25 |
+| `coast_deceleration` | g | 0.05 |
+| `enrichment_start_fraction` | rated power fraction | 0.5 |
+| `enrichment_max` | fraction | 0.15 |
+| `drivetrain_factor` | fraction | 0.9 |
+| `fuel_energy` | J/US gal | 121,320,000 |
+
+The catalog scales idle rate with engine displacement, fits efficiency to city
+and highway lab tests, estimates coasting deceleration from road load and engine
+braking, and sets drivetrain factor by drive layout. Fuel energy depends on fuel
+type; the enrichment start and maximum retain the reference values. Parameter
+sources are recorded through `parameters_source_url`. See
+[vehicle-catalog.md](vehicle-catalog.md) for fitting methods and quality flags.
+
+Supported catalog entries include gasoline and diesel vehicles, plus hybrids and
+plug-ins flagged `drives_with_engine_off`. The equations do not describe their
+engine-off operation, so their fitted parameters need particular caution.
+Electric, hydrogen, CNG, LPG and E85-only configurations, configurations with
+missing required data, and those whose tests cannot fit the model are unsupported.
+The picker selects a typical tested configuration for each make/model/year;
+it does not identify the driver's exact engine or trim.
+
+`backend/repo.py` selects the driver's supported catalog entry by `vehicle_id`.
+`car_profile()` in `backend/services/cost_model.py` attaches its parameters and
+fuel type. If the driver has no supported catalog vehicle, the backend falls back
+to the Mazda5 reference. The library itself rejects an invalid non-reference
+profile with `unsupported_vehicle_profile`; it does not silently substitute a car.
+Only the unchanged `reference_profile()` can omit `parameters`.
+
+Pass the same profile to `scoring_config(..., vehicle_profile=profile)` and
+`estimate_trip(...)`. The configuration records that car's assumptions and its
+identity includes the profile, parameters and fuel price. A changed profile with
+an old configuration produces `scoring_config_mismatch`. Mazda5 reference results
+and configuration remain unchanged.
+
+For `fuel_type="diesel"`, supply the diesel price; the receipt assumption is
+`diesel_price` instead of `gas_price`. The library does not fetch prices or convert
+a gasoline price to diesel. The backend selects its configured weekly US-average
+regular gasoline or on-highway diesel price. Premium-fuel requirements are not
+available in the catalog, so gasoline cars all use the regular price.
 
 ## Phone and backend contract
 
@@ -75,10 +116,12 @@ The backend does not currently accept raw IMU streams or perform event detection
 ```python
 from drive_save_model import estimate_trip, reference_profile, scoring_config
 
-# Create once per cohort and reuse. This is an example price, not a live quote.
-config = scoring_config(3.50, price_as_of="2026-10-24")
+# Use a backend-supplied catalog profile here to price another supported car.
+profile = reference_profile()
+# Create once per vehicle/configuration and reuse. Example price, not a live quote.
+config = scoring_config(3.50, price_as_of="2026-10-24", vehicle_profile=profile)
 result = estimate_trip(
-    vehicle_profile=reference_profile(),
+    vehicle_profile=profile,
     speed_samples=samples,
     trip_metadata={
         "started_at": "2026-10-24T12:00:00Z",
@@ -134,21 +177,26 @@ labels must remain truthful even when `is_demo=true`.
 
 ## Calculations and interpretation
 
-The version is `notion-mazda5-2012-auto-v1`:
+The model version remains `notion-mazda5-2012-auto-v1` for all supported vehicles;
+the configuration identifies the specific vehicle and assumptions. In the formulas
+below, η is `marginal_wheel_efficiency`, E is `fuel_energy` in J/gal, and q is
+`idle_rate` in gal/hour from that vehicle's parameters:
 
 - Road load: F(v)=A+Bv+Cv² after SI conversion. Steady fuel per metre is
-  F(v)/(0.30×121.32 MJ/gal) + (0.25 gal/hour)/v. At zero speed this expression is
-  not used; diagnostic idle fuel is explicitly 0.25 gal/hour.
-- Braking compares the Notion early-coasting scenario at 0.05 g with cruising then
-  braking. Extra distance is max(0,(v1²-v2²)/(2ac) − (v1+v2)t/2). Multiply by the
+  F(v)/(η×E) + q/(3600×v), with v in m/s. At zero speed this expression is
+  not used; diagnostic idle fuel is q/3600 gal/second.
+- Braking compares the Notion early-coasting scenario at the vehicle's
+  `coast_deceleration` (0.05 g for the reference Mazda5) with cruising then braking. Extra distance is max(0,(v1²-v2²)/(2ac) − (v1+v2)t/2). Multiply by the
   steady fuel per metre at v1. Both decelerations assume zero fueling. This is an
   unobserved scenario assumption, not a phone measurement or guaranteed floor.
 - Require recorded preceding history for extra_distance/v1 seconds, with speed
   within 2 m/s of v1. This makes the cruise approximation more plausible but does
   not establish that earlier braking was possible or that the driver used throttle.
 - Acceleration uses the Notion energy and peak-power formulas, with an enrichment
-  penalty beginning at 50% rated power and capped at 15%. These parameters are
-  uncalibrated. Some harsh accelerations therefore get zero estimated fuel penalty.
+  penalty beginning at `enrichment_start_fraction` and capped at
+  `enrichment_max` (50% and 15% in the catalog and Mazda5 reference). Mass, road
+  load, rated horsepower, drivetrain factor, efficiency and fuel energy come from
+  the vehicle profile. The enrichment assumptions remain uncalibrated. Some harsh accelerations therefore get zero estimated fuel penalty.
 - Sharp turns are coaching-only. A zero modeled dollar contribution does not mean
   that aggressive cornering has no real cost or is safe.
 - High-speed cost compares each remaining segment with 65 mph. This is not a speed
@@ -157,7 +205,8 @@ The version is `notion-mazda5-2012-auto-v1`:
   rather than count them twice. The resulting contribution excludes those windows.
 - `avoidable_usd` sums braking, acceleration and the remaining high-speed amounts.
   The trip MPG budget (`fuel_gal`) is a separate approximate city/highway blend by
-  average speed, using label MPG directly. Never add penalties to it or subtract
+  average speed, using the profile's city/highway MPG directly. These are published
+  label values for the Mazda5 reference and estimated label values for catalog cars. Never add penalties to it or subtract
   penalties to manufacture a measured twin fuel total; `reference_fuel_gal` is null.
 - Tire/brake wear, insurance and annual projections are excluded. The time
   difference is theoretical uninterrupted travel time, not observed time saved.
@@ -189,7 +238,7 @@ of changed payloads under the same client_trip_id. The adapter opens no connecti
 Rank percentage improvement in estimated waste per mile against the first three
 eligible trips of at least one mile under the same immutable configuration. Keep
 negative improvement and leave missing/zero baselines unranked. The new model has
-a new configuration; historical model trips never enter its baseline. Frozen gas
+a new configuration; historical model trips never enter its baseline. A frozen fuel
 price prevents price changes from looking like improved driving. Route/traffic
 changes can still affect the comparison; this is not a validated safety ranking.
 
@@ -200,7 +249,11 @@ HWFET (40.3 laboratory MPG) and US06 (24.2 laboratory MPG). These are **diagnost
 not validation of the separate label-MPG trip budget or the event penalties.
 Actual dynamometer speed, gear, temperature and fuel-flow traces are unavailable.
 FTP's 26.4 MPG is listed but not compared to a single UDDS replay because FTP uses
-weighted cold/hot phases. No calibration or parameter fitting has been applied.
+weighted cold/hot phases. No calibration or parameter fitting has been applied
+to the unchanged Mazda5 reference. Catalog vehicles do use fitted efficiency;
+agreement with the lab tests used for fitting is not independent validation of
+trip fuel use or event savings. The CLI validation does not evaluate every catalog
+vehicle.
 
 Real phone recordings are still needed to check sensor handling and repeatability.
 Measured, synchronized fuel consumption plus separate evaluation trips are needed
