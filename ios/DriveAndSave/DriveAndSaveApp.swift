@@ -4,11 +4,12 @@ import SwiftUI
 
 @main
 struct DriveAndSaveApp: App {
+    @StateObject private var presentation = PresentationState()
     @StateObject private var model = AppViewModel()
     @StateObject private var backend = BackendViewModel()
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(model).environmentObject(backend).preferredColorScheme(.dark).tint(DS.mint)
+            RootView().environmentObject(model).environmentObject(backend).environmentObject(presentation).preferredColorScheme(.dark).tint(DS.mint)
         }
     }
 }

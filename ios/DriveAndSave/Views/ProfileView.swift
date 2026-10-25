@@ -53,10 +53,15 @@ struct WelcomeView: View {
 }
 
 struct ProfileView: View {
+    @EnvironmentObject private var presentation: PresentationState
     @EnvironmentObject private var backend: BackendViewModel
     @AppStorage("developerMode") private var developerMode = false
     var body: some View {
         Screen {
+            PresentationModeControl()
+            if presentation.isEnabled {
+                SampleProfileSummary()
+            } else {
             DisplayType(backend.identity?.nickname ?? "No account", size: 44).accessibilityIdentifier("profileNickname")
             if !backend.isRemote { Text("Offline demo · this iPhone only").font(.caption).foregroundStyle(DS.secondary) }
             Surface {
@@ -80,6 +85,7 @@ struct ProfileView: View {
                 } else { Text("No vehicle selected").foregroundStyle(DS.secondary) }
                 NavigationLink("My Vehicle") { MyVehicleView() }.accessibilityIdentifier("myVehicle")
             }
+            }
             Surface {
                 Eyebrow(text: "Developer Mode")
                 Toggle("Enable developer tools", isOn: $developerMode).accessibilityIdentifier("developerMode")
@@ -90,7 +96,7 @@ struct ProfileView: View {
             }
         }
         .navigationTitle("Profile").navigationBarTitleDisplayMode(.inline)
-        .task { await backend.refreshLeague(); await backend.refreshMyVehicle() }
+        .task { if !presentation.isEnabled { await backend.refreshLeague(); await backend.refreshMyVehicle() } }
     }
 }
 

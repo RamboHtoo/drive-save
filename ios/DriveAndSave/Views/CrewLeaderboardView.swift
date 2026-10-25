@@ -1,10 +1,15 @@
 import SwiftUI
 
 struct CrewLeaderboardView: View {
+    @EnvironmentObject private var presentation: PresentationState
     @EnvironmentObject private var backend: BackendViewModel
     @AppStorage("developerMode") private var developerMode = false
     var body: some View {
         Screen {
+            PresentationModeControl(leagueContext: true)
+            if presentation.isEnabled {
+                SampleLeagueStandings()
+            } else {
             if !backend.isRemote { Eyebrow(text: "Offline demo · no multiplayer") }
             DisplayType(backend.league?.name ?? "Leagues", size: 48).accessibilityAddTraits(.isHeader).accessibilityIdentifier("leagueHeadline")
             if backend.league == nil { leagueActionLayout }
@@ -50,9 +55,10 @@ struct CrewLeaderboardView: View {
                 DisclosureGroup("Manage league") { leagueActionLayout.padding(.top, 12) }
             }
             ConsumerBackendStatusView()
+            }
         }.navigationTitle("Leagues").navigationBarTitleDisplayMode(.inline)
-            .refreshable { await backend.refreshLeague() }
-            .task { if backend.identity != nil { await backend.refreshLeague() } }
+            .refreshable { if !presentation.isEnabled { await backend.refreshLeague() } }
+            .task { if !presentation.isEnabled && backend.identity != nil { await backend.refreshLeague() } }
     }
     private var leagueActionLayout: some View {
         ViewThatFits(in: .horizontal) {

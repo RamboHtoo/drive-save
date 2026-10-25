@@ -2,11 +2,16 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject private var model: AppViewModel
+    @EnvironmentObject private var presentation: PresentationState
     @EnvironmentObject private var backend: BackendViewModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         Screen {
+            PresentationModeControl()
+            if presentation.isEnabled {
+                SampleHomeDashboard()
+            } else {
             VStack(alignment: .leading, spacing: 10) {
                 if backend.isRemote {
                     Eyebrow(text: "Estimated savings · this week").accessibilityAddTraits(.isHeader).accessibilityIdentifier("homeHeadline")
@@ -15,7 +20,7 @@ struct HomeView: View {
                     if backend.progressError != nil {
                         Text("Progress unavailable").font(.headline)
                         Text("Check your connection and try again.").font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("progressError")
-                        Button("Retry") { Task { await backend.refreshProgress() } }
+                        Button("Retry") { Task { if !presentation.isEnabled { await backend.refreshProgress() } } }
                     } else if let progress = backend.progress {
                         if !progress.hasSavings {
                             Text(progress.availability).font(.subheadline).foregroundStyle(DS.secondary).accessibilityIdentifier("progressEmptyState")
@@ -34,10 +39,11 @@ struct HomeView: View {
                 HStack { Text("Start Drive"); Spacer(); Text("↗").font(.title2) }
             }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("startTrip")
             Text("Set up and review trips only when safely parked.").font(.footnote).foregroundStyle(DS.secondary)
+            }
         }
-        .task(id: backend.progressContext) { await backend.refreshProgress() }
-        .refreshable { await backend.refreshProgress() }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await backend.refreshProgress() } } }
+        .task(id: backend.progressContext) { if !presentation.isEnabled { await backend.refreshProgress() } }
+        .refreshable { if !presentation.isEnabled { await backend.refreshProgress() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { if !presentation.isEnabled { await backend.refreshProgress() } } } }
         .safeAreaInset(edge: .top, spacing: 0) { masthead }
         .navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar)
     }

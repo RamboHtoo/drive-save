@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TripHistoryView: View {
     @EnvironmentObject private var model: AppViewModel
+    @EnvironmentObject private var presentation: PresentationState
     @EnvironmentObject private var backend: BackendViewModel
     @AppStorage("developerMode") private var developerMode = false
     @State private var includeWalkingTests = false
@@ -13,6 +14,10 @@ struct TripHistoryView: View {
     }
     var body: some View {
         Screen {
+            PresentationModeControl()
+            if presentation.isEnabled {
+                SampleTripHistory()
+            } else {
             if !backend.isRemote { Text("Offline demo · sample trips").font(.caption).foregroundStyle(DS.secondary) }
             if developerMode {
                 Toggle("Include Walking Tests", isOn: $includeWalkingTests).accessibilityIdentifier("includeWalkingTests")
@@ -39,7 +44,8 @@ struct TripHistoryView: View {
                         .overlay(alignment: .bottom) { MeasurementRule() }
                 }.buttonStyle(.plain).accessibilityIdentifier("historyTrip-\(trip.title)")
             }
-        }.navigationTitle("Trip history").navigationBarTitleDisplayMode(.inline).refreshable { await model.load() }
+            }
+        }.navigationTitle(presentation.isEnabled ? "Sample history" : "Trip history").navigationBarTitleDisplayMode(.inline).refreshable { if !presentation.isEnabled { await model.load() } }
     }
     private func amount(for trip: Trip) -> String {
         if trip.isWalkingTest { return "GPS test" }
