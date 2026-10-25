@@ -18,7 +18,9 @@ CREATE OR REPLACE FUNCTION public.drive_save_baseline(
 ) RETURNS TABLE (baseline_trip_count bigint, baseline_usd_per_mile numeric, state text)
 LANGUAGE sql STABLE AS $$
   SELECT count(*),
-    CASE WHEN count(*) = 3 THEN sum(t.avoidable_usd) / sum(t.distance_mi) END,
+    -- v2 prices only observed GPS miles. Older receipts retain reported miles.
+    CASE WHEN count(*) = 3 THEN sum(t.avoidable_usd) /
+      sum(coalesce((t.model_result->>'scored_distance_mi')::numeric, t.distance_mi)) END,
     CASE WHEN count(*) < 3 THEN 'collecting_baseline'
          WHEN sum(t.avoidable_usd) = 0 THEN 'zero_baseline'
          ELSE 'ready' END
@@ -164,7 +166,8 @@ LANGUAGE sql STABLE AS $$
       AND m.league_id IS NOT DISTINCT FROM t.league_id
       AND m.scoring_config_id = t.scoring_config_id AND m.is_demo = t.is_demo
       AND m.is_baseline = (t.baseline_slot IS NOT NULL)
-      AND m.distance_mi = t.distance_mi AND m.fuel_gal = t.fuel_gal
+      AND m.distance_mi = coalesce((t.model_result->>'scored_distance_mi')::numeric, t.distance_mi)
+      AND m.fuel_gal = t.fuel_gal
       AND m.avoidable_usd = t.avoidable_usd) END,
     t.quality_flags
   FROM public.trips t WHERE t.user_id = p_user_id AND t.is_demo = p_is_demo

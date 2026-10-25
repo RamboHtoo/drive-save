@@ -91,7 +91,7 @@ def test_invalid_speed_is_unknown(payload, bad):
 
 
 @pytest.mark.parametrize('mutation,reason', [
-    (lambda p:p['speed_samples'].pop(), 'missing_boundary_speed'),
+    (lambda p:p['speed_samples'].__delitem__(slice(-4, None)), 'gps_boundary_gap_over_three_seconds'),
     (lambda p:p['speed_samples'].append(p['speed_samples'][5].copy()), 'invalid_or_duplicate_sequence'),
     (lambda p:p['trip_metadata'].update(distance_mi=100), 'distance_mismatch_over_10_percent'),
     (lambda p:p['trip_metadata'].update(is_demo=False), 'experimental_model_requires_demo_mode'),

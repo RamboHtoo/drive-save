@@ -112,7 +112,7 @@ Example request: [`fixtures/sample-trip.json`](../fixtures/sample-trip.json).
 
 Every number must be finite: NaN and infinity are rejected. Don't send coordinates; the backend doesn't store location.
 
-**Speed readings:** log every location update for the whole trip, about one per second, with the first reading at `started_at` and the last at `ended_at`. The fuel model prices a trip only when the readings cover it without gaps over 3 s, `distance_mi` matches them within 10%, and each event's speeds match GPS within 2 m/s. A trip that misses one of these is still stored; its receipt returns `409` `trip_not_scored` with the reason. The full list is in [`docs/cost-model.md`](cost-model.md).
+**Speed readings:** log every location update for the whole trip, about one per second. Keep the original session start/end and each observation's measurement timestamp; they need not match. The model scores only the first-to-last valid GPS interval, with at most 3 s missing at either edge, at least 95% direct coverage of the original session, and no interior gap over 3 s. `distance_mi` must match the observed integral within 10%, and each event's speeds must match GPS within 2 m/s. Events and their required history must fit inside the scored window. A trip that misses a gate is still stored; its receipt returns `409` `trip_not_scored` with the reason. See [GPS scoring windows](gps-scoring-window.md).
 
 Response (`201`, or `200` for a duplicate):
 
@@ -131,7 +131,9 @@ Trips are priced by the data teammate's fuel model ([`docs/cost-model.md`](cost-
 - `events[].cost_usd`: what each event cost. Braking and acceleration have a cost; sharp turns are coaching only and cost $0.
 - `high_speed_cost_usd`: the cost of driving above 65 mph, which isn't tied to an event.
 - `avoidable_cost_usd`: the trip's total: the event costs plus `high_speed_cost_usd`.
-- `cost_model`: which model produced the amounts, `vehicle-fuel-v1`.
+- `cost_model`: which model produced the amounts, `vehicle-fuel-v2` for new receipts.
+- `distance_mi`: original uploaded distance. `scored_distance_mi` is the observed distance used for pricing and rankings.
+- `scoring_started_at`, `scoring_ended_at`, `scoring_duration_seconds`: the GPS-covered interval. `monetary_scope` is `observed_gps_window`; `quality_flags` includes `gps_window_trimmed` when edges are unpriced. New fields are nullable for old receipts. Display the server's `label` and coverage note, which disclose partial coverage.
 - `assumptions[]`: every numeric constant with its `source_url` and `as_of` date, including the fuel price (`gas_price`, or `diesel_price` for a diesel car). For a car from the vehicle list, the car's own parameters (`marginal_wheel_efficiency`, `idle_rate` and so on) have EPA's Test Car List as their source. `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
 - `notes[]`: the assumptions that aren't numbers, such as `road_conditions: level, no wind, warm engine`.
 - A trip the model couldn't price returns `409` with `trip_not_scored`; `message` names the reason, for example `event_recording_incomplete`.

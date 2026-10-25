@@ -313,10 +313,11 @@ async def _scoring_config(conn: asyncpg.Connection, config: dict) -> UUID:
 async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, trip_id: UUID, result: CostModelOutput, config: dict) -> None:
     config_id = await _scoring_config(conn, config)
     avoidable = result.avoidable_usd
+    scored_distance = _dec(result.details["scored_distance_mi"])
 
     # Baseline: the first 3 scored trips of at least a mile, per driver, configuration and demo flag.
     slot = None
-    if trip.distance_mi >= MIN_BASELINE_MILES:
+    if min(_dec(trip.distance_mi), scored_distance) >= MIN_BASELINE_MILES:
         used = await conn.fetchval(
             "SELECT count(*) FROM trips WHERE user_id = $1 AND scoring_config_id = $2 AND is_demo = $3 AND baseline_slot IS NOT NULL",
             user.user_id,
@@ -343,16 +344,17 @@ async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, 
     await conn.execute(
         """
         INSERT INTO trip_metrics (ts, trip_id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, is_baseline, is_demo)
-        SELECT started_at, id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, baseline_slot IS NOT NULL, is_demo
+        SELECT started_at, id, user_id, league_id, scoring_config_id, $2, fuel_gal, avoidable_usd, baseline_slot IS NOT NULL, is_demo
         FROM trips WHERE id = $1
         """,
         trip_id,
+        scored_distance,
     )
 
     if slot is None:  # a later trip: record the signed estimated improvement against the frozen baseline
         baseline = await conn.fetchrow("SELECT * FROM drive_save_baseline($1, $2, $3)", user.user_id, config_id, trip.is_demo)
         if baseline["state"] == "ready":
-            amount = baseline["baseline_usd_per_mile"] * _dec(trip.distance_mi) - _dec(avoidable)
+            amount = baseline["baseline_usd_per_mile"] * scored_distance - _dec(avoidable)
             await conn.execute("INSERT INTO savings_ledger (trip_id, user_id, amount_usd) VALUES ($1, $2, $3)", trip_id, user.user_id, amount)
 
 
@@ -419,10 +421,23 @@ async def receipt(trip_id: UUID, user_id: UUID) -> Receipt:
             trip_id,
         )
     details = t["model_result"] or {}  # empty for trips priced before the Mazda5 model
+    trace = details.get("trace", {})
     numeric = [a for a in t["assumptions"] if _is_number(a["value"]) and a["unit"]]
+    notes = [f"{a['key']}: {a['value']}" for a in t["assumptions"] if a not in numeric]
+    if trace.get("window_trimmed"):
+        notes.append(f"Estimate covers {details['scored_distance_mi']:.6f} GPS-observed miles over "
+                     f"{trace['scoring_duration_seconds']:.3f} seconds; "
+                     f"{trace['unobserved_start_seconds']:.3f} seconds at the start and "
+                     f"{trace['unobserved_end_seconds']:.3f} seconds at the end are unpriced.")
     return Receipt(
         trip_id=trip_id,
         distance_mi=float(t["distance_mi"]),
+        scored_distance_mi=details.get("scored_distance_mi"),
+        scoring_started_at=trace.get("scoring_started_at"),
+        scoring_ended_at=trace.get("scoring_ended_at"),
+        scoring_duration_seconds=trace.get("scoring_duration_seconds"),
+        monetary_scope=details.get("monetary_scope"),
+        quality_flags=t["quality_flags"],
         events=[
             ReceiptEvent(
                 type=e["type"],
@@ -439,7 +454,7 @@ async def receipt(trip_id: UUID, user_id: UUID) -> Receipt:
         vehicle=(t["vehicle_profile"] or {}).get("name"),
         label=details.get("receipt_label"),
         assumptions=[Assumption(**a) for a in numeric],
-        notes=[f"{a['key']}: {a['value']}" for a in t["assumptions"] if a not in numeric],
+        notes=notes,
         is_demo=t["is_demo"],
     )
 

@@ -164,13 +164,25 @@ Version must be the same across the trip and its events. The backend checks thes
 fields; they cannot prove a malicious client is reporting honestly.
 
 Trips last 3 seconds–2 hours, with at most 30,000 speed samples and 1,000 events.
-Require valid boundary readings, 95% directly observed time coverage, maximum
-3-second gaps, speed accuracy at most 2 m/s, speed at most 120 mph, and integrated
-speed distance within 10% of reported distance. Reject changes above 1.5 g in the
-resampled trace. Event duration is (0,120] seconds; peak magnitude is (0,2] g.
+Score from the first valid GPS observation to the last, preserving the original
+session timestamps. Each unobserved edge may be at most 3 seconds; the observed
+window must last at least 3 seconds. Never extrapolate or insert endpoint speeds.
+Require 95% directly observed coverage of the **original session**, maximum
+3-second interior gaps, speed accuracy at most 2 m/s, speed at most 120 mph, and
+integrated speed distance within 10% of reported distance. Keep all observation
+knots when resampling; reject changes above 1.5 g in both raw and resampled traces.
+Events and preceding braking comparison history must fit inside the observed
+window, or the entire monetary result is insufficient. Event duration is (0,120]
+seconds; peak magnitude is (0,2] g.
 Event speed endpoints must agree with GPS within 2 m/s, and longitudinal average
 acceleration cannot exceed the reported peak by more than 0.2 m/s². These are
 engineering quality gates, not validated safety thresholds.
+
+The exact rules, iOS handoff, fixture provenance, and verification commands are
+in [GPS scoring windows](gps-scoring-window.md). Trimmed receipts disclose their
+observed interval and unpriced edges. `model_details.scored_distance_mi` is the
+six-decimal observed distance used by metrics, baselines, and savings; original
+uploaded distance and timestamps remain unchanged.
 
 The backend supplies vehicle/configuration and all financial values. Clients do
 not choose efficiency, cost, baseline slots, or arbitrary model versions. Source
@@ -178,7 +190,7 @@ labels must remain truthful even when `is_demo=true`.
 
 ## Calculations and interpretation
 
-The model version is `vehicle-fuel-v1` for all supported vehicles;
+The model version is `vehicle-fuel-v2` for all supported vehicles;
 the configuration identifies the specific vehicle and assumptions. In the formulas
 below, η is `marginal_wheel_efficiency`, E is `fuel_energy` in J/gal, and q is
 `idle_rate` in gal/hour from that vehicle's parameters:
@@ -237,7 +249,8 @@ HTTP authentication, payload validation, immutable completed uploads, and reject
 of changed payloads under the same client_trip_id. The adapter opens no connections.
 
 Rank percentage improvement in estimated waste per mile against the first three
-eligible trips of at least one mile under the same immutable configuration. Keep
+eligible trips with at least one reported and one GPS-scored mile under the same
+immutable configuration. Use scored miles in both baseline and later-trip rates. Keep
 negative improvement and leave missing/zero baselines unranked. The new model has
 a new configuration; historical model trips never enter its baseline. A frozen fuel
 price prevents price changes from looking like improved driving. Route/traffic
