@@ -108,13 +108,15 @@ It asks for the `tsdbadmin` password at a hidden prompt, then:
 
 1. Checks that Tiger is at the schema version in [`analytics/schema.sql`](../analytics/schema.sql) (version 4). If not, it stops before changing anything.
 2. Applies [`backend/db/002_event_details.sql`](../backend/db/002_event_details.sql): the event column the backend stores on top of the shared schema.
-3. Applies [`backend/db/app_role.sql`](../backend/db/app_role.sql) with a new random password. It creates `drivesave_app`, which can read and write app data but can't change the schema.
-4. Checks that `drivesave_app` can read the tables and call the analytics functions.
-5. Writes its `DATABASE_URL` into `backend/.env` on the server (`SERVER` and `SSH_KEY` at the top of the script; `SKIP_SERVER=1` skips this step).
+3. Applies [`backend/db/003_vehicle_catalog.sql`](../backend/db/003_vehicle_catalog.sql): the vehicle list's tables.
+4. Loads the vehicle list from the EPA files in `vehicle/` with [`backend/scripts/load_vehicles.py`](../backend/scripts/load_vehicles.py) (about 10 s; skipped when the same files are already loaded). It needs `backend/.venv` with `backend/requirements-dev.txt` installed. See [vehicle-catalog.md](vehicle-catalog.md).
+5. Applies [`backend/db/app_role.sql`](../backend/db/app_role.sql) with a new random password. It creates `drivesave_app`, which can read and write app data and read the vehicle list, but can't change the schema.
+6. Checks that `drivesave_app` can read the tables and call the analytics functions.
+7. Writes its `DATABASE_URL` into `backend/.env` on the server (`SERVER` and `SSH_KEY` at the top of the script; `SKIP_SERVER=1` skips this step).
 
 No password is printed. It's safe to rerun: a rerun gives `drivesave_app` a new password and updates the server. Restart the API afterwards so it uses the new URL: `docker compose up -d`.
 
-To do it by hand instead, run the two `backend/db` files in the Tiger Cloud SQL editor as `tsdbadmin` (replace `CHANGE_ME` in `app_role.sql` with a password from `openssl rand -hex 24`), then set `DATABASE_URL` in `backend/.env` on the server to `postgres://drivesave_app:<password>@<host>:<port>/tsdb?sslmode=require` and restart. Keep the password out of Git, Notion and chat.
+To do it by hand instead, run the three `backend/db` files in the Tiger Cloud SQL editor as `tsdbadmin`, `app_role.sql` last (replace `CHANGE_ME` in it with a password from `openssl rand -hex 24`), and after `003_vehicle_catalog.sql` load the vehicle list with `PGPASSWORD=<tsdbadmin password> backend/.venv/bin/python backend/scripts/load_vehicles.py "<connection string>"`. Then set `DATABASE_URL` in `backend/.env` on the server to `postgres://drivesave_app:<password>@<host>:<port>/tsdb?sslmode=require` and restart. Keep the password out of Git, Notion and chat.
 
 ## 9. Share the URL
 

@@ -13,9 +13,15 @@ router = APIRouter(tags=["users"])
 
 @router.post("/users", response_model=UserCreated, status_code=status.HTTP_201_CREATED)
 async def create_user(body: UserCreate) -> UserCreated:
+    vehicle = None
+    if body.vehicle is not None:
+        choice = body.vehicle
+        vehicle = await repo.vehicle(choice.make, choice.model, choice.year)
+        if vehicle is None:
+            raise ApiError(422, "vehicle_not_found", f"No {choice.year} {choice.make} {choice.model} in the vehicle list; pick one from GET /vehicles/years")
     token = new_token()
-    user_id = await repo.create_user(body.nickname, hash_token(token))
-    return UserCreated(user_id=user_id, nickname=body.nickname, token=token)
+    user_id = await repo.create_user(body.nickname, hash_token(token), vehicle)
+    return UserCreated(user_id=user_id, nickname=body.nickname, token=token, vehicle=vehicle)
 
 
 @router.put("/users/me/vehicle", response_model=VehicleData)

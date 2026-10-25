@@ -17,11 +17,20 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   until docker exec "$NAME" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 fi
 
-for file in analytics/schema.sql analytics/queries.sql backend/db/002_event_details.sql; do
+for file in analytics/schema.sql analytics/queries.sql backend/db/002_event_details.sql backend/db/003_vehicle_catalog.sql; do
   docker exec -i "$NAME" psql -q -U postgres -v ON_ERROR_STOP=1 < "$file" >/dev/null
 done
 # Tests truncate tables between runs, so keep the aggregate purely real-time (no background refresh).
 docker exec "$NAME" psql -q -U postgres -c \
   "SELECT remove_continuous_aggregate_policy('public.daily_user_metrics', if_exists => true);" >/dev/null
+
+# The vehicle list, from the EPA files in vehicle/ (about 10 s; skipped when already loaded).
+if [[ -d vehicle ]]; then
+  python=python3
+  if [[ -x backend/.venv/bin/python ]]; then python=backend/.venv/bin/python; fi
+  "$python" backend/scripts/load_vehicles.py --if-changed postgresql://postgres:test@localhost:55432/postgres
+else
+  echo "No vehicle/ folder: the vehicle list stays empty and its tests are skipped"
+fi
 
 echo "TimescaleDB ready: postgresql://postgres:test@localhost:55432/postgres"

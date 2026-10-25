@@ -378,6 +378,91 @@ def test_vehicle_data_must_be_a_reasonable_object(client, body):
     assert res.json()["error"]["code"] == "validation_error"
 
 
+@pytest.fixture
+def vehicle_list():
+    """The vehicle list that scripts/load_vehicles.py loads from vehicle/ (test-db.sh runs it)."""
+    if query("SELECT count(*) FROM vehicle_models")[0]["count"] == 0:
+        pytest.skip("vehicle list not loaded: put the EPA files in vehicle/ and rerun backend/scripts/test-db.sh")
+
+
+MAZDA5_2012 = {"make": "Mazda", "model": "MAZDA5", "year": 2012}
+
+
+def test_car_picker_walks_brand_then_model_then_year(client, vehicle_list):
+    makes = client.get("/vehicles/makes").json()["makes"]
+    assert "Mazda" in makes and makes == sorted(makes, key=str.upper)
+
+    models = client.get("/vehicles/models", params={"make": "mazda"}).json()  # case doesn't matter
+    assert models["make"] == "Mazda" and "MAZDA5" in models["models"]
+
+    years = client.get("/vehicles/years", params={"make": "Mazda", "model": "Mazda5"}).json()
+    assert years["model"] == "MAZDA5" and 2012 in years["years"]
+    assert years["years"] == sorted(years["years"], reverse=True)
+
+    car = client.get("/vehicles/details", params=MAZDA5_2012).json()
+    assert (car["make"], car["model"], car["year"], car["supported"]) == ("Mazda", "MAZDA5", 2012, True)
+    assumptions = {a["key"] for a in cost_model.SCORING_CONFIG["assumptions"]}
+    assert {p["key"] for p in car["parameters"]} <= assumptions  # named like the model's own assumptions
+    assert {p["key"]: p["value"] for p in car["parameters"]}["idle_rate"] == 0.25  # 2.5 L, like the model's Mazda5
+
+
+def test_model_names_with_slashes_work_as_query_parameters(client, vehicle_list):
+    years = client.get("/vehicles/years", params={"make": "Honda", "model": "ACCORD EX/EX-L COUPE"})
+    assert years.status_code == 200 and years.json()["years"]
+
+
+@pytest.mark.parametrize(
+    "path, params",
+    [
+        ("/vehicles/models", {"make": "Nope"}),
+        ("/vehicles/years", {"make": "Mazda", "model": "Nope"}),
+        ("/vehicles/details", {"make": "Mazda", "model": "MAZDA5", "year": 1999}),
+    ],
+)
+def test_unknown_cars_are_not_found(client, vehicle_list, path, params):
+    res = client.get(path, params=params)
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "vehicle_not_found"
+
+
+def test_car_picker_needs_its_query_parameters(client):
+    res = client.get("/vehicles/years", params={"make": "Mazda"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "validation_error"
+
+
+def test_electric_cars_are_listed_without_fuel_model_parameters(client, vehicle_list):
+    tesla = client.get("/vehicles/models", params={"make": "Tesla"}).json()["models"][0]
+    year = client.get("/vehicles/years", params={"make": "Tesla", "model": tesla}).json()["years"][0]
+    car = client.get("/vehicles/details", params={"make": "Tesla", "model": tesla, "year": year}).json()
+    assert car["supported"] is False and car["parameters"] == []
+    assert car["specs"]["fuel_type"] == "electricity"
+
+
+def test_sign_up_with_a_car_stores_it(client, vehicle_list):
+    res = client.post("/users", json={"nickname": "kai", "vehicle": {"make": "MAZDA", "model": "mazda5", "year": 2012}})
+    assert res.status_code == 201
+    car = res.json()["vehicle"]
+    assert car == client.get("/vehicles/details", params=MAZDA5_2012).json()
+
+    headers = {"Authorization": f"Bearer {res.json()['token']}"}
+    assert client.get("/users/me/vehicle", headers=headers).json() == car
+    stored = query("SELECT mpg_city, mpg_hwy FROM users WHERE id = $1", uuid.UUID(res.json()["user_id"]))[0]
+    assert (float(stored["mpg_city"]), float(stored["mpg_hwy"])) == (car["mpg"]["city"], car["mpg"]["highway"])
+
+
+def test_sign_up_without_a_car_still_works(client):
+    res = client.post("/users", json={"nickname": "kai"})
+    assert res.status_code == 201 and res.json()["vehicle"] is None
+
+
+def test_sign_up_with_an_unknown_car_creates_no_user(client, vehicle_list):
+    res = client.post("/users", json={"nickname": "kai", "vehicle": {**MAZDA5_2012, "year": 1999}})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "vehicle_not_found"
+    assert query("SELECT count(*) FROM users")[0]["count"] == 0
+
+
 def test_cost_model_receives_every_trip_and_event_field(client, model_inputs):
     _, headers = new_user(client)
     trip_id = upload(client, headers).json()["trip_id"]

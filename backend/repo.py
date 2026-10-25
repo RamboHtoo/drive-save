@@ -2,7 +2,7 @@
 
 Tables and analytics functions come from analytics/schema.sql and
 analytics/queries.sql (schema v4, owned by the data teammate), plus
-backend/db/002_event_details.sql. The rules for uploads, baselines and metrics
+backend/db/002_event_details.sql and 003_vehicle_catalog.sql. The rules for uploads, baselines and metrics
 follow docs/database-setup.md. The API's crews are the schema's leagues: tables
 leagues and league_members, column league_id.
 """
@@ -24,7 +24,9 @@ from models.crews import MIN_ACTIVE_MEMBERS
 from models.leaderboard import Leaderboard, Period, Standing
 from models.trips import Assumption, Receipt, ReceiptEvent, SpeedSample, TripCreate, TripEventIn
 from models.users import Progress, WeeklyPoint
+from models.vehicles import MpgEstimate, Vehicle, VehicleSource, VehicleSpecs
 from services import cost_model
+from services.epa_dataset import model_key
 
 BASELINE_TRIPS = 3
 MIN_BASELINE_MILES = 1
@@ -55,8 +57,16 @@ class User:
     vehicle: dict[str, JsonValue] | None
 
 
-async def create_user(nickname: str, token_hash: str) -> UUID:
-    return await db.pool().fetchval("INSERT INTO users (nickname, token_hash) VALUES ($1, $2) RETURNING id", nickname, token_hash)
+async def create_user(nickname: str, token_hash: str, vehicle: Vehicle | None = None) -> UUID:
+    mpg = vehicle.mpg if vehicle else None
+    return await db.pool().fetchval(
+        "INSERT INTO users (nickname, token_hash, vehicle, mpg_city, mpg_hwy) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        nickname,
+        token_hash,
+        vehicle.model_dump(mode="json") if vehicle else None,
+        _dec(mpg.city) if mpg and mpg.city else None,
+        _dec(mpg.highway) if mpg and mpg.highway else None,
+    )
 
 
 async def user_by_token_hash(token_hash: str) -> User | None:
@@ -66,6 +76,61 @@ async def user_by_token_hash(token_hash: str) -> User | None:
 
 async def set_vehicle(user_id: UUID, vehicle: dict[str, JsonValue]) -> None:
     await db.pool().execute("UPDATE users SET vehicle = $2 WHERE id = $1", user_id, vehicle)
+
+
+# ---- Vehicle list ---------------------------------------------------------------------------
+# vehicle_models (backend/db/003_vehicle_catalog.sql), loaded from the EPA Test Car List by
+# scripts/load_vehicles.py. Lookups go through the same upper-case keys the loader stored.
+
+
+async def vehicle_makes() -> list[str]:
+    rows = await db.pool().fetch("SELECT DISTINCT make_key, make FROM vehicle_models ORDER BY make_key")
+    return [r["make"] for r in rows]
+
+
+async def vehicle_models(make: str) -> tuple[str, list[str]] | None:
+    """(the brand as listed, its models), or None for a brand that isn't in the list."""
+    rows = await db.pool().fetch("SELECT DISTINCT model_key, make, model FROM vehicle_models WHERE make_key = $1 ORDER BY model_key", model_key(make))
+    return (rows[0]["make"], [r["model"] for r in rows]) if rows else None
+
+
+async def vehicle_years(make: str, model: str) -> tuple[str, str, list[int]] | None:
+    rows = await db.pool().fetch(
+        "SELECT make, model, model_year FROM vehicle_models WHERE make_key = $1 AND model_key = $2 ORDER BY model_year DESC",
+        model_key(make),
+        model_key(model),
+    )
+    return (rows[0]["make"], rows[0]["model"], [r["model_year"] for r in rows]) if rows else None
+
+
+async def vehicle(make: str, model: str, year: int) -> Vehicle | None:
+    row = await db.pool().fetchrow(
+        "SELECT * FROM vehicle_models WHERE make_key = $1 AND model_key = $2 AND model_year = $3", model_key(make), model_key(model), year
+    )
+    if row is None:
+        return None
+    return Vehicle(
+        vehicle_id=row["id"],
+        make=row["make"],
+        model=row["model"],
+        year=row["model_year"],
+        supported=row["supported"],
+        specs=VehicleSpecs(
+            fuel_type=row["fuel_type"],
+            vehicle_type=row["vehicle_type"],
+            engine_displacement_l=row["displacement_l"],
+            cylinders=row["cylinders"],
+            rated_horsepower=row["rated_hp"],
+            transmission=row["transmission"],
+            gears=row["gears"],
+            drive=row["drive"],
+            test_weight_lb=row["etw_lb"],
+        ),
+        mpg=MpgEstimate(city=_float(row["label_city_mpg"], 1), highway=_float(row["label_highway_mpg"], 1), combined=_float(row["label_combined_mpg"], 1)),
+        parameters=row["parameters"],
+        flags=row["flags"],
+        source=VehicleSource(test_vehicle_id=row["test_vehicle_id"], test_configuration=row["test_configuration"], configurations_tested=row["variant_count"]),
+    )
 
 
 # ---- Crews ----------------------------------------------------------------------------------

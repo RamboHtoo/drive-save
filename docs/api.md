@@ -21,9 +21,13 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | Method and path | Purpose | Status |
 | --- | --- | --- |
 | `GET /health` | Deployment check (no auth) | Done |
-| `POST /users` | Create a user; returns `user_id` and `token` (no auth) | Done |
-| `PUT /users/me/vehicle` | Send the driver's car data from the EPA dataset; stored as-is | Done |
-| `GET /users/me/vehicle` | The car data, exactly as sent | Done |
+| `POST /users` | Create a user, optionally with their car from the vehicle list; returns `user_id` and `token` (no auth) | Done |
+| `GET /vehicles/makes` | Every brand in the vehicle list (no auth) | Done |
+| `GET /vehicles/models?make=` | The brand's models (no auth) | Done |
+| `GET /vehicles/years?make=&model=` | The model's years, newest first (no auth) | Done |
+| `GET /vehicles/details?make=&model=&year=` | The car's specs, MPG and fuel model parameters (no auth) | Done |
+| `PUT /users/me/vehicle` | Replace the driver's car with any JSON object; stored as-is | Done |
+| `GET /users/me/vehicle` | The driver's car: the one picked at sign-up, or as last sent | Done |
 | `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done |
 | `POST /trips` | Upload a trip summary, detected events and GPS speed readings | Done, idempotent |
 | `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done, priced by the data teammate's Mazda5 fuel model |
@@ -37,12 +41,39 @@ Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/dem
 
 ## Vehicles
 
-The app lets the driver pick their car from the EPA dataset and sends that car's data with `PUT /users/me/vehicle`. The body is a JSON object with any fields. The backend doesn't read or change them; it stores the object as sent. The current fuel model supports one car, a 2012 Mazda5, and prices every trip as that car, so the driver's car stays on file for models that support more cars.
+The app's car picker walks the vehicle list (the EPA Test Car List, model years 2010 to 2026) in three steps. None of them needs a token, so the picker can come before sign-up. Make and model go in the query string, URL-encoded: model names contain spaces and slashes, like `ACCORD EX/EX-L COUPE`. Matching ignores case and extra spaces.
 
-Example body: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json), built from a real row of the EPA Test Car List.
+1. `GET /vehicles/makes` returns `{"makes": ["Acura", "Alfa Romeo", ...]}`
+2. `GET /vehicles/models?make=Mazda` returns `{"make": "Mazda", "models": ["6", "CX-3", ..., "MAZDA5", ...]}`
+3. `GET /vehicles/years?make=Mazda&model=MAZDA5` returns `{"make": "Mazda", "model": "MAZDA5", "years": [2015, 2014, 2013, 2012, 2010]}`
 
-- The body must be a JSON object with 1 to 200 fields, under 20 KB.
-- `GET /users/me/vehicle` returns the object exactly as sent, or `404` with `vehicle_not_set`.
+Then sign up with the choice:
+
+```json
+POST /users
+{"nickname": "kai", "vehicle": {"make": "Mazda", "model": "MAZDA5", "year": 2012}}
+```
+
+The response's `vehicle` is the stored car: the same object `GET /vehicles/details?make=Mazda&model=MAZDA5&year=2012` returns.
+
+| Field | Meaning |
+| --- | --- |
+| `vehicle_id` | Stable for this make, model and year |
+| `make`, `model`, `year` | As the list spells them |
+| `supported` | `false` when the fuel model can't describe the car (electric, hydrogen, CNG, E85-only, or missing lab tests). `parameters` is then empty |
+| `specs` | Fuel type, engine, transmission, drive, EPA test weight |
+| `mpg` | Window-sticker MPG estimated from the lab tests (`is_estimate: true`) |
+| `parameters` | The fuel model's per-car values (`key`, `value`, `unit`, `method`), named like the receipt's assumptions |
+| `flags` | Caveats, e.g. `drives_with_engine_off` for hybrids |
+| `source` | The EPA test vehicle the values come from, and how many configurations EPA tested that year |
+
+How the list and the parameters are built: [vehicle-catalog.md](vehicle-catalog.md).
+
+- An unknown brand, model or year returns `404` with `vehicle_not_found` from the `GET /vehicles/...` endpoints, and `422` with `vehicle_not_found` from `POST /users`, which then creates no user.
+- `vehicle` is optional at sign-up. `GET /users/me/vehicle` returns the stored car, or `404` with `vehicle_not_set`.
+- `PUT /users/me/vehicle` still replaces the car with any JSON object (1 to 200 fields, under 20 KB), stored and returned as sent. To change to a car from the list, send its `GET /vehicles/details` object. A free-form example: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json).
+
+The current fuel model supports one car, a 2012 Mazda5, and prices every trip as that car. The driver's car and its parameters stay on file for when the model supports more cars.
 
 ## Trips
 

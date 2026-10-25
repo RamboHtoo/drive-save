@@ -3,15 +3,19 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from models.vehicles import Vehicle, VehicleChoice
+
 
 class UserCreate(BaseModel):
     nickname: str = Field(min_length=1, max_length=32)
+    vehicle: VehicleChoice | None = Field(None, description="The driver's car, picked from GET /vehicles/makes, /models and /years")
 
 
 class UserCreated(BaseModel):
     user_id: UUID
     nickname: str
     token: str = Field(description="Send as 'Authorization: Bearer <token>'. Shown only once.")
+    vehicle: Vehicle | None = Field(None, description="The car stored for the driver; GET /users/me/vehicle returns it")
 
 
 class WeeklyPoint(BaseModel):
