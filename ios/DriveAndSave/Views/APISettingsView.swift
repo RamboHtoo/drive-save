@@ -84,7 +84,7 @@ struct ConsumerBackendStatusView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         if backend.isBusy { ProgressView("Updating…") }
-        if backend.errorMessage != nil { Text("We couldn’t complete that request. Check your connection and try again.").font(.subheadline).foregroundStyle(.orange) }
+        if backend.errorMessage != nil { Text(backend.consumerErrorMessage ?? "We couldn’t complete that request. Check your connection and try again.").font(.subheadline).foregroundStyle(.orange) }
     }
 }
 

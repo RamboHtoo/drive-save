@@ -4,14 +4,13 @@ enum TripUploadBuilder {
     static func payload(for trip: Trip) throws -> APITripPayload {
         guard !trip.isWalkingTest else { throw BackendError.invalidInput("Walking Tests cannot be uploaded to the driving API.") }
         guard let clientID = trip.clientTripID, let recording = trip.recording else { throw BackendError.invalidInput("This older trip lacks a recording-start client ID. Record a new trip or use Test Calculation in Developer Mode.") }
-        guard !trip.measurementsIncomplete else { throw BackendError.invalidInput("This recording has incomplete measurements. Keep it locally; it is not eligible for upload.") }
         guard let samples = recording.speedSamples else { throw BackendError.invalidInput("This older recording has no timestamped GPS speed accuracy/sequence data. Upload is unsupported.") }
         var events: [APITripEvent] = []
         for event in recording.events {
             guard let version = event.detectorVersion, let duration = event.durationSeconds, let peak = event.peakG else { throw BackendError.invalidInput("An event lacks detector version, observed duration, or peak acceleration. No values were fabricated.") }
-            let before = samples.filter { $0.ts <= event.timestamp && event.timestamp.timeIntervalSince($0.ts) <= 10 && $0.speed_mps != nil }.max { $0.ts < $1.ts }
+            let before = samples.filter { $0.ts <= event.timestamp && event.timestamp.timeIntervalSince($0.ts) <= 10 && GPSScoringWindow.valid($0) }.max { $0.ts < $1.ts }
             let end = event.timestamp.addingTimeInterval(duration)
-            let after = samples.filter { $0.ts >= end && $0.ts.timeIntervalSince(end) <= 10 && $0.speed_mps != nil }.min { $0.ts < $1.ts }
+            let after = samples.filter { $0.ts >= end && $0.ts.timeIntervalSince(end) <= 10 && GPSScoringWindow.valid($0) }.min { $0.ts < $1.ts }
             guard let beforeSpeed = before?.speed_mps, let afterSpeed = after?.speed_mps else { throw BackendError.invalidInput("Event \(event.kind.label) lacks valid before/after GPS speed readings. Keep the trip locally; it cannot be priced reliably.") }
             let courseBefore = recording.gpsPoints.filter { $0.timestamp <= event.timestamp && event.timestamp.timeIntervalSince($0.timestamp) <= 10 && $0.courseDegrees != nil }.last?.courseDegrees
             let courseAfter = recording.gpsPoints.first { $0.timestamp >= end && $0.timestamp.timeIntervalSince(end) <= 10 && $0.courseDegrees != nil }?.courseDegrees
@@ -26,18 +25,11 @@ enum TripUploadBuilder {
         try validate(result)
         return result
     }
-    /// Mirrors the model's strict endpoints without trimming the interval or adding readings.
+    /// Local edge/metadata checks only; the server owns detailed coverage, gaps and physics gates.
     static func scoringIssue(for trip: Trip) -> String? {
         guard let recording = trip.recording else { return "Missing recording details" }
-        let valid = (recording.speedSamples ?? []).filter {
-            guard let speed = $0.speed_mps, let accuracy = $0.speed_accuracy_mps else { return false }
-            return speed.isFinite && (0...53.6448).contains(speed) && accuracy.isFinite && (0...2).contains(accuracy)
-        }.sorted { $0.ts < $1.ts }
-        guard let first = valid.first, let last = valid.last,
-              abs(first.ts.timeIntervalSince(trip.date)) <= 0.000001,
-              abs(last.ts.timeIntervalSince(recording.endedAt)) <= 0.000001 else {
-            return "missing_boundary_speed: Backend requires valid GPS speed at both button-tap boundaries within 1 microsecond. No readings were added or timestamps changed."
-        }
+        do { _ = try GPSScoringWindow(samples: recording.speedSamples ?? [], startedAt: trip.date, endedAt: recording.endedAt) }
+        catch { return error.localizedDescription }
         guard recording.eventsComplete == true else { return "event_recording_incomplete: Detector coverage does not span the entire scoring interval (or is unknown for an older recording)." }
         guard let version = recording.detectorVersion, !version.isEmpty else { return "missing_detector_version" }
         guard recording.events.allSatisfy({ $0.detectorVersion == version }) else { return "detector_version_mismatch" }
@@ -60,7 +52,7 @@ enum TripUploadBuilder {
             if let speed = sample.speed_mps { try require(speed.isFinite && (0...53.6448).contains(speed), "Invalid GPS speed.") }
             if let accuracy = sample.speed_accuracy_mps { try require(accuracy.isFinite && accuracy >= 0, "Invalid GPS speed accuracy.") }
         }
-        if !payload.events.isEmpty { try require(payload.speed_samples.contains { $0.speed_mps != nil }, "Events require valid GPS speed samples.") }
+        if !payload.events.isEmpty { try require(payload.speed_samples.contains { GPSScoringWindow.valid($0) }, "Events require valid GPS speed samples.") }
         for event in payload.events {
             try require(["harsh_brake", "rapid_accel", "sharp_turn"].contains(event.type) && !event.detector_version.isEmpty && event.detector_version.count <= 64, "Unsupported event type or detector version.")
             try require(event.ts >= payload.started_at && event.ts <= payload.ended_at, "Event is outside the trip window.")

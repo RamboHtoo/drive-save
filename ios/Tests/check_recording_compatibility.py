@@ -42,20 +42,23 @@ if args.recording:
 else:
     full, result = evaluate(args.payloads / "complete-fixture.json")
     assert full["source"] == "replayed" and full["is_demo"] is True
-    assert full["events_complete"] is True and full["detector_version"] == "ios-0.2.0"
+    assert full["events_complete"] is True and full["detector_version"] == "ios-0.3.0"
     assert result.status == "scored" and result.avoidable_usd is not None
-    gap, result = evaluate(args.payloads / "boundary-gap-fixture.json")
-    assert gap["speed_samples"] == full["speed_samples"]
-    assert result.status == "insufficient_data" and "missing_boundary_speed" in result.quality_flags
-    assert result.avoidable_usd is None and result.fuel_gal is None
-    recorded, result = evaluate(args.payloads / "recorded-mode-fixture.json")
-    assert recorded["source"] == "recorded" and recorded["is_demo"] is False
-    assert recorded["speed_samples"] == full["speed_samples"]
-    assert result.status == "insufficient_data" and "missing_boundary_speed" in result.quality_flags
-    assert result.avoidable_usd is None and result.fuel_gal is None
-    incomplete, result = evaluate(args.payloads / "incomplete-fixture.json")
-    assert incomplete["events_complete"] is False
-    assert result.status == "insufficient_data" and "event_recording_incomplete" in result.quality_flags
-    assert result.avoidable_usd is None and result.fuel_gal is None
-    print("PASS: four Swift-generated payloads validated through backend TripCreate, build_input and fuel model.")
-    print("Fixture compatibility only; genuine button-boundary recordings remain blocked. No physical recording supplied.")
+    for name in ["boundary-gap-fixture", "recorded-mode-fixture", "asynchronous-fixture", "three-second-edges-fixture"]:
+        raw, result = evaluate(args.payloads / (name + ".json"))
+        assert raw["speed_samples"] == full["speed_samples"]
+        if name == "recorded-mode-fixture":
+            assert raw["source"] == "recorded" and raw["is_demo"] is False
+        assert result.status == "scored" and result.avoidable_usd is not None
+    for name, reason in [
+        ("excess-edge-fixture", "gps_boundary_gap_over_three_seconds"),
+        ("sparse-fixture", "valid_time_coverage_below_95_percent"),
+        ("interior-gap-fixture", "gps_gap_over_three_seconds"),
+        ("inaccurate-fixture", "insufficient_valid_speed"),
+        ("incomplete-fixture", "event_recording_incomplete"),
+    ]:
+        _, result = evaluate(args.payloads / (name + ".json"))
+        assert result.status == "insufficient_data" and reason in result.quality_flags
+        assert result.avoidable_usd is None and result.fuel_gal is None
+    print("PASS: ten Swift-generated payloads validated through backend TripCreate, build_input and fuel model.")
+    print("Controlled synthetic compatibility evidence only. No physical iPhone recording supplied or uploaded.")

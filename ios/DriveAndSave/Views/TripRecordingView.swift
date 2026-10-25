@@ -18,42 +18,49 @@ struct TripRecordingView: View {
     @State private var showDebug = false
     private var savedRecordingDeleted: Bool { savedTrip.map { !model.isLocalTrip($0) } ?? false }
     var body: some View {
-        Screen {
-            if savedRecordingDeleted {
-                Label("Local recording deleted", systemImage: "trash").foregroundStyle(DS.secondary)
-                Text("Any uploaded receipt and league results are unchanged.").foregroundStyle(DS.secondary)
-            } else if let savedTrip {
-                Label("Trip saved on this iPhone", systemImage: "checkmark.circle.fill").foregroundStyle(DS.mint)
-                NavigationLink { TripReceiptView(trip: savedTrip) } label: {
-                    Label("Open trip receipt", systemImage: "receipt").font(.headline).frame(maxWidth: .infinity).padding()
-                }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("openReceipt")
-                Text("You can also find it in History.").foregroundStyle(DS.secondary)
-            } else if began {
-                recordingContent
-            } else {
-                setupContent
+        ScrollViewReader { scroll in
+            Screen {
+                VStack(alignment: .leading, spacing: 24) {
+                    if savedRecordingDeleted {
+                        Label("Local recording deleted", systemImage: "trash").foregroundStyle(DS.secondary)
+                        Text("Any uploaded receipt and league results are unchanged.").foregroundStyle(DS.secondary)
+                    } else if let savedTrip {
+                        Label("Trip saved on this iPhone", systemImage: "checkmark.circle.fill").foregroundStyle(DS.mint)
+                        NavigationLink { TripReceiptView(trip: savedTrip) } label: {
+                            Label("Open trip receipt", systemImage: "receipt").font(.headline).frame(maxWidth: .infinity).padding()
+                        }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("openReceipt")
+                        Text("You can also find it in History.").foregroundStyle(DS.secondary)
+                    } else if began {
+                        recordingContent
+                    } else {
+                        setupContent
+                    }
+                }.id("recordingTop")
             }
-        }
-        .navigationTitle(savedRecordingDeleted ? "Recording deleted" : walkingMode ? "Walking Test" : savedTrip != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(began && savedTrip == nil)
-        .onAppear { if !began { recorder.prepare(mode: selectedMode) } }
-        .onDisappear {
-            if recorder.isRecording { recorder.endForInterruption(reason: "Recording screen was left. Recording ended; return to save the partial trip.") }
-            else { recorder.stopHardware() }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                if began && savedTrip == nil { recorder.endForInterruption() }
-                else { recorder.prepare(mode: selectedMode) }
+            .onChange(of: began) { _, recordingBegan in
+                if recordingBegan { scroll.scrollTo("recordingTop", anchor: .top) }
             }
+            .navigationTitle(savedRecordingDeleted ? "Recording deleted" : walkingMode ? "Walking Test" : savedTrip != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(began && savedTrip == nil)
+            .onAppear { if !began { recorder.prepare(mode: selectedMode) } }
+            .onDisappear {
+                if recorder.isRecording { recorder.endForInterruption(reason: "Recording screen was left. Recording ended; return to save the partial trip.") }
+                else { recorder.stopHardware() }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    if began && savedTrip == nil { recorder.endForInterruption() }
+                    else { recorder.prepare(mode: selectedMode) }
+                }
+            }
+            .sheet(isPresented: $showDebug) { NavigationStack { MotionDebugView(recorder: recorder) } }
+            .alert("Trip not saved", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("Retry save") { finish() }
+                Button("Keep here", role: .cancel) { }
+            } message: { Text(saveError ?? "") }
+            .navigationDestination(item: $receipt) { trip in TripReceiptView(trip: trip) }
         }
-        .sheet(isPresented: $showDebug) { NavigationStack { MotionDebugView(recorder: recorder) } }
-        .alert("Trip not saved", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
-            Button("Retry save") { finish() }
-            Button("Keep here", role: .cancel) { }
-        } message: { Text(saveError ?? "") }
-        .navigationDestination(item: $receipt) { trip in TripReceiptView(trip: trip) }
     }
 
     private var setupContent: some View {
@@ -115,14 +122,8 @@ struct TripRecordingView: View {
             Surface {
                 Label(recorder.isRecording ? "Recording · foreground only" : "Recording ended", systemImage: recorder.isRecording ? "record.circle" : "pause.circle")
                     .font(.headline).foregroundStyle(DS.mint)
-                Text(recorder.elapsedLabel).font(.system(size: 56, weight: .bold, design: .monospaced)).monospacedDigit().accessibilityIdentifier("elapsedTime")
-                HStack { Metric(value: recorder.distanceLabel, label: simulatorMode ? "simulated distance" : "GPS distance"); Metric(value: recorder.eventCountLabel, label: "driving events") }
+                LiveTelemetryView(recorder: recorder, mountingConfirmed: mountingConfirmed)
                 Text(recorder.locationStatus).font(.caption).foregroundStyle(DS.secondary)
-                if developerMode {
-                Text("GPS accuracy: \(recorder.accuracyLabel)").font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("gpsAccuracy")
-                Text(recorder.calibrationLabel).font(.caption).foregroundStyle(DS.secondary)
-                Text(recorder.detectionStatus).font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("detectionStatus")
-                }
                 if recorder.measurementsIncomplete {
                     Label("Measurements incomplete · some trip details may be unavailable", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 }
@@ -131,6 +132,12 @@ struct TripRecordingView: View {
             if let interruption = recorder.interruption { Text(interruption).font(.subheadline).foregroundStyle(.orange) }
             Button(walkingMode ? "Stop & save Walking Test" : "Stop & save · I’m parked") { finish() }
                 .font(.headline).buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("stopTrip")
+            if developerMode {
+                Text("Driving events: \(recorder.eventCountLabel)").font(.caption).foregroundStyle(DS.secondary)
+                Text("GPS accuracy: \(recorder.accuracyLabel)").font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("gpsAccuracy")
+                Text(recorder.calibrationLabel).font(.caption).foregroundStyle(DS.secondary)
+                Text(recorder.detectionStatus).font(.caption).foregroundStyle(DS.secondary).accessibilityIdentifier("detectionStatus")
+            }
             if developerMode && !walkingMode {
             DisclosureGroup("Sensor diagnostics") {
                 Button("View live sensor measurements") { showDebug = true }.padding(.vertical)

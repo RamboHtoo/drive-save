@@ -51,6 +51,60 @@ struct DrivingEvent: Codable, Hashable, Identifiable {
     var peakG: Double? = nil
 }
 
+/// vehicle-fuel-v2 / observed-gps-window-v1. Uses measurement times, never button-time copies.
+struct GPSScoringWindow {
+    let first: Date
+    let last: Date
+    static func valid(_ sample: APISpeedSample) -> Bool {
+        guard let speed = sample.speed_mps, let accuracy = sample.speed_accuracy_mps else { return false }
+        return speed.isFinite && (0...53.6448).contains(speed) && accuracy.isFinite && (0...2).contains(accuracy)
+    }
+    static func freshSpeed(_ sample: APISpeedSample?, at time: Date) -> Double? {
+        guard let sample, valid(sample), (0...3).contains(time.timeIntervalSince(sample.ts)) else { return nil }
+        return sample.speed_mps
+    }
+    init(samples: [APISpeedSample], startedAt: Date, endedAt: Date) throws {
+        guard endedAt > startedAt, samples.allSatisfy({ $0.ts.timeIntervalSince1970.isFinite && $0.ts >= startedAt && $0.ts <= endedAt }) else {
+            throw BackendError.invalidInput("out_of_trip_timestamp: Every GPS observation must remain inside the original recording interval.")
+        }
+        let valid = samples.filter(Self.valid).sorted { $0.ts < $1.ts }
+        guard valid.count >= 2, let first = valid.first?.ts, let last = valid.last?.ts, last > first else {
+            throw BackendError.invalidInput("insufficient_valid_speed: At least two distinct GPS observations need speed 0–53.6448 m/s and speed accuracy 0–2 m/s.")
+        }
+        guard first.timeIntervalSince(startedAt) <= 3.000001, endedAt.timeIntervalSince(last) <= 3.000001 else {
+            throw BackendError.invalidInput("gps_boundary_gap_over_three_seconds: The first and last valid GPS observations must be within 3 seconds of Start and Stop. Original timestamps are retained.")
+        }
+        self.first = first; self.last = last
+    }
+}
+
+struct GPSQualitySummary: Codable, Hashable {
+    let startupSeconds: Double?
+    let trailingSeconds: Double?
+    let maximumGapSeconds: Double
+    var isPartial: Bool { (startupSeconds ?? 0) > 3.000001 || (trailingSeconds ?? 0) > 3.000001 || maximumGapSeconds > 3.000001 }
+}
+
+/// Only reliable measurement timestamps establish coverage. Callback errors alone do not.
+struct GPSQualityTracker {
+    let startedAt: Date
+    private var first: Date?
+    private var last: Date?
+    private var maximumGap = 0.0
+    mutating func observe(_ timestamp: Date) {
+        guard timestamp >= startedAt, timestamp.timeIntervalSince1970.isFinite else { return }
+        if let last {
+            guard timestamp > last else { return }
+            maximumGap = max(maximumGap, timestamp.timeIntervalSince(last))
+        }
+        if first == nil { first = timestamp }
+        last = timestamp
+    }
+    func summary(through end: Date) -> GPSQualitySummary {
+        .init(startupSeconds: first.map { $0.timeIntervalSince(startedAt) }, trailingSeconds: last.map { max(0, end.timeIntervalSince($0)) }, maximumGapSeconds: maximumGap)
+    }
+}
+
 /// Frozen locally at Start; never contains authentication secrets.
 struct RecordingContext: Codable, Hashable {
     let ownerID: UUID
@@ -65,26 +119,41 @@ struct RecordingContext: Codable, Hashable {
     }
 }
 
-/// Evidence, not an inference from an empty event list. Boundary gaps remain incomplete.
+/// Actual motion observations and their classification eligibility, independent of button edges.
 struct DetectorCoverage: Codable, Hashable {
+    struct Run: Codable, Hashable {
+        let first: Double
+        var last: Double
+        let eligible: Bool
+    }
     let startedUptime: Double
     private(set) var firstObservation: Double?
     private(set) var lastObservation: Double?
     private(set) var failures: [String] = []
+    private(set) var runs: [Run]? = nil // nil in legacy archives: never invent coverage.
 
     mutating func invalidate(_ reason: String) {
         if !failures.contains(reason) { failures.append(reason) }
     }
-    mutating func observe(uptime: Double) {
+    mutating func observe(uptime: Double, eligible: Bool = true) {
         guard uptime.isFinite, uptime >= startedUptime else { return }
         if let lastObservation, uptime <= lastObservation { invalidate("Non-monotonic detector samples"); return }
-        if let lastObservation, uptime - lastObservation > 1 { invalidate("Motion sample gap") }
         if firstObservation == nil { firstObservation = uptime }
+        if runs == nil { runs = [] }
+        if let previous = runs?.last, previous.eligible == eligible, uptime - previous.last <= 1 {
+            runs![runs!.count - 1].last = uptime
+        } else { runs?.append(.init(first: uptime, last: uptime, eligible: eligible)) }
         lastObservation = uptime
     }
-    func complete(through endedUptime: Double) -> Bool {
-        guard failures.isEmpty, let firstObservation, let lastObservation else { return false }
-        return endedUptime > startedUptime && firstObservation <= startedUptime && lastObservation >= endedUptime
+    func complete(from start: Double, through end: Double) -> Bool {
+        guard start.isFinite, end.isFinite, end > start, failures.isEmpty,
+              let firstObservation, let lastObservation, firstObservation <= start, lastObservation >= end,
+              let runs, !runs.isEmpty else { return false }
+        for run in runs where !run.eligible && run.last >= start && run.first <= end { return false }
+        for (left, right) in zip(runs, runs.dropFirst()) {
+            if right.first - left.last > 1, left.last < end, right.first > start { return false }
+        }
+        return true
     }
 }
 
@@ -107,6 +176,8 @@ struct RecordingDetails: Codable, Hashable {
     var eventsComplete: Bool? = nil
     var detectorVersion: String? = nil
     var detectorCoverage: DetectorCoverage? = nil
+    var observedGPSWindowComplete: Bool? = nil
+    var gpsQuality: GPSQualitySummary? = nil
 }
 
 struct DetectionConfiguration: Codable, Hashable {
@@ -120,7 +191,7 @@ struct DetectionConfiguration: Codable, Hashable {
 
 /// Candidate detection only; thresholds require real-device validation.
 struct CandidateEventDetector {
-    static let version = "ios-0.2.0"
+    static let version = "ios-0.3.0"
     var configuration = DetectionConfiguration()
     private var starts: [DrivingEventKind: Double] = [:]
     private var peaks: [DrivingEventKind: Double] = [:]
@@ -184,7 +255,7 @@ struct GPSDistanceFilter {
         let meters = 6_371_000 * 2 * atan2(sqrt(max(0, min(1, a))), sqrt(max(0, 1-a)))
         guard meters / dt <= maximumSpeedMetersPerSecond else { return nil }
         self.previous = point
-        let gap = dt > 10
+        let gap = dt > 3.000001
         let noiseRadius = max(3, min(point.accuracyMeters, previous.accuracyMeters))
         if gap {
             distanceAnchor = point

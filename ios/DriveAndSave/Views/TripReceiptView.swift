@@ -87,6 +87,11 @@ struct TripReceiptAdvancedView: View {
                     Text("Ended: \(recording.endedAt.formatted())")
                     Text("Events complete: \(recording.eventsComplete.map(String.init) ?? "Unknown (legacy)")")
                     Text("Detector: \(recording.detectorVersion ?? "Unknown (legacy)")")
+                    Text("Observed GPS-window detector coverage: \(recording.observedGPSWindowComplete.map(String.init) ?? "Unknown")")
+                    if let quality = recording.gpsQuality {
+                        Text("GPS startup: \(quality.startupSeconds.map(String.init(describing:)) ?? "No reliable fix") s")
+                        Text("GPS trailing gap: \(quality.trailingSeconds.map(String.init(describing:)) ?? "Unknown") s; maximum interior gap: \(quality.maximumGapSeconds) s")
+                    }
                     if let coverage = recording.detectorCoverage {
                         Text("Detector coverage: \(coverage.firstObservation.map(String.init(describing:)) ?? "none") to \(coverage.lastObservation.map(String.init(describing:)) ?? "none") uptime")
                         ForEach(coverage.failures, id: \.self) { Text($0) }

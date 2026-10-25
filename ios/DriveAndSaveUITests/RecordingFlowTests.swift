@@ -47,9 +47,19 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         // The deterministic source produces acceleration, braking and turn candidates in 12 seconds.
         let elapsed = app.staticTexts["elapsedTime"]
-        let enoughTime = NSPredicate { _, _ in (elapsed.label.components(separatedBy: ":").last.flatMap(Int.init) ?? 0) >= 13 }
+        let enoughTime = NSPredicate { _, _ in (((elapsed.value as? String) ?? elapsed.label).components(separatedBy: ":").last.flatMap(Int.init) ?? 0) >= 13 }
         expectation(for: enoughTime, evaluatedWith: nil)
         waitForExpectations(timeout: 20)
+        XCTAssertEqual(app.staticTexts["liveGPSSpeed"].label, "Simulated GPS speed")
+        XCTAssertEqual(app.staticTexts["liveGPSSpeed"].value as? String, "Unavailable", "The synthetic fixture has no observed GPS speed accuracy")
+        XCTAssertTrue(app.staticTexts["Simulated vehicle acceleration"].exists)
+        XCTAssertEqual(app.staticTexts["liveForwardAcceleration"].label, "Forward")
+        XCTAssertEqual(app.staticTexts["liveLateralAcceleration"].label, "Lateral")
+        let signedG = "^(positive|negative) [0-9]+\\.[0-9]{3} g$"
+        XCTAssertNotNil((app.staticTexts["liveForwardAcceleration"].value as? String)?.range(of: signedG, options: .regularExpression))
+        XCTAssertTrue(app.staticTexts["liveTripDistance"].value as? String != "Unavailable")
+        app.scrollFullyIntoView(app.staticTexts["elapsedTime"])
+        let telemetry = XCTAttachment(screenshot: app.screenshot()); telemetry.name = "Live telemetry · synthetic fixture"; telemetry.lifetime = .keepAlways; add(telemetry)
         let stop = app.buttons["stopTrip"]
         if !stop.isHittable { app.swipeUp() }
         stop.tap()
@@ -153,7 +163,7 @@ final class RecordingFlowTests: XCTestCase {
         app.scrollFullyIntoView(app.buttons["beginRecording"]); app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.buttons["stopTrip"].waitForExistence(timeout: 5))
         let elapsed = app.staticTexts["elapsedTime"]
-        expectation(for: NSPredicate { _, _ in (elapsed.label.components(separatedBy: ":").last.flatMap(Int.init) ?? 0) >= 2 }, evaluatedWith: nil)
+        expectation(for: NSPredicate { _, _ in (((elapsed.value as? String) ?? elapsed.label).components(separatedBy: ":").last.flatMap(Int.init) ?? 0) >= 2 }, evaluatedWith: nil)
         waitForExpectations(timeout: 10)
         app.scrollFullyIntoView(app.buttons["stopTrip"]); app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["Vehicle recorded: 2012 Mazda MAZDA5"].waitForExistence(timeout: 5))
@@ -166,6 +176,28 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Vehicle recorded: 2012 Mazda MAZDA5"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Vehicle recorded: 2026 Tesla Cybertruck AWD"].exists)
         XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Insufficient recording data")
+    }
+
+    @MainActor
+    func testTelemetryAtAccessibilityTextSizeKeepsStopReachable() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launchOffline()
+        app.buttons["startTrip"].tap(); app.segmentedControls.buttons["Walking Test"].tap()
+        app.scrollFullyIntoView(app.buttons["beginRecording"]); app.buttons["beginRecording"].tap()
+        for id in ["elapsedTime", "liveTripDistance", "liveGPSSpeed", "liveForwardAcceleration", "liveLateralAcceleration"] {
+            let metric = app.staticTexts[id]
+            // At accessibility XXXL these form several screens. Reveal them in reading order.
+            for _ in 0..<16 where !metric.isHittable { app.swipeUp() }
+            XCTAssertTrue(metric.exists && metric.isHittable, "Telemetry must remain readable with large accessibility text")
+            if id == "liveGPSSpeed" {
+                XCTAssertEqual(metric.label, "GPS speed")
+                XCTAssertEqual(metric.value as? String, "Unavailable")
+            }
+        }
+        let stop = app.buttons["stopTrip"]
+        app.scrollFullyIntoView(stop); XCTAssertTrue(stop.isHittable); stop.tap()
+        XCTAssertTrue(app.staticTexts["No fuel estimate"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -189,7 +221,7 @@ final class RecordingFlowTests: XCTestCase {
         app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Unavailable"].exists)
+        XCTAssertEqual(app.staticTexts["liveTripDistance"].value as? String, "Unavailable")
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["Recorded drive"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Incomplete recording")
@@ -241,8 +273,10 @@ final class WalkingFlowTests: XCTestCase {
         app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Disabled"].exists)
-        XCTAssertTrue(app.staticTexts["Unavailable"].exists)
+        XCTAssertEqual(app.staticTexts["liveTripDistance"].value as? String, "Unavailable")
+        let disabledEvents = app.staticTexts["Driving events: Disabled"]
+        for _ in 0..<8 where !disabledEvents.isHittable { app.swipeUp() }
+        XCTAssertTrue(disabledEvents.exists)
         let stop = app.buttons["stopTrip"]
         for _ in 0..<5 where !stop.isHittable { app.swipeUp() }
         XCTAssertFalse(app.buttons["nav-Home"].exists, "Recording is a focused secondary destination")
@@ -306,12 +340,15 @@ final class WalkingGPSRouteTests: XCTestCase {
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         let distance = NSPredicate { _, _ in
-            app.staticTexts.allElementsBoundByIndex.contains { $0.label.hasSuffix(" mi") && $0.label != "0.00 mi" }
+            app.staticTexts.allElementsBoundByIndex.contains {
+                let value = ($0.value as? String) ?? $0.label
+                return value.hasSuffix(" mi") && value != "0.00 mi"
+            }
         }
         expectation(for: distance, evaluatedWith: nil)
         waitForExpectations(timeout: 35)
         XCTAssertTrue(app.staticTexts["gpsAccuracy"].exists)
-        XCTAssertTrue(app.staticTexts["Disabled"].exists)
+        XCTAssertTrue(app.staticTexts["Driving events: Disabled"].exists)
         let recordingImage = XCTAttachment(screenshot: app.screenshot())
         recordingImage.name = "Walking Test recording"
         recordingImage.lifetime = .keepAlways

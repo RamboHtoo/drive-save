@@ -34,6 +34,7 @@ final class BackendViewModel: ObservableObject {
     @Published private(set) var standings: [APIStanding] = []
     @Published private(set) var leaderboardIsDemo = false
     @Published private(set) var notice: String?
+    @Published private(set) var consumerErrorMessage: String?
     @Published var errorMessage: String?
     @Published private var revision = 0
     @Published private(set) var progress: APIProgress?
@@ -73,8 +74,8 @@ final class BackendViewModel: ObservableObject {
     private var remoteURL = "https://drivesave.nuhylabs.com"
     private var state = BackendLocalState()
     private let fileURL: URL
-    init() {
-        fileURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("DriveSave/backend-state\(credentialSuffix).json")
+    init(storageURL: URL? = nil) {
+        fileURL = storageURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("DriveSave/backend-state\(credentialSuffix).json")
         do {
             if FileManager.default.fileExists(atPath: fileURL.path) { state = try JSONDecoder().decode(BackendLocalState.self, from: Data(contentsOf: fileURL)) }
             vehicle = state.vehicle; vehicleConfirmed = state.vehicleConfirmed
@@ -102,10 +103,11 @@ final class BackendViewModel: ObservableObject {
     private func key(_ id: UUID) -> String { "\(isRemote ? remoteURL : "mock"):\(id.uuidString)" }
     private func run(_ operation: () async throws -> Void) async {
         guard !isBusy else { return }
-        isBusy = true; errorMessage = nil
+        isBusy = true; errorMessage = nil; consumerErrorMessage = nil
         defer { isBusy = false }
         do { try await operation() }
         catch let error as URLError { errorMessage = "Network unavailable or interrupted. Check your connection and retry. Saved trips remain on this device. \(error.localizedDescription)" }
+        catch let error as BackendError { errorMessage = error.localizedDescription; consumerErrorMessage = error.consumerMessage }
         catch { errorMessage = error.localizedDescription }
         do {
             let updated = try await api.identity()
@@ -113,11 +115,11 @@ final class BackendViewModel: ObservableObject {
             if let message = await api.takeResetNotice() { notice = message; recoveryMessage = message; league = nil; standings = [] }
         } catch { errorMessage = error.localizedDescription }
     }
-    func connect(remote: Bool, baseURL: String) async {
+    func connect(remote: Bool, baseURL: String, client: BackendAPIClient? = nil) async {
         await run {
             let url = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines))
             guard !remote || (url?.scheme == "https" && url?.host != nil && url?.user == nil && url?.password == nil && url?.query == nil && url?.fragment == nil) else { throw BackendError.invalidInput("Enter a valid HTTPS API base URL.") }
-            api = BackendAPIClient(mode: remote ? .remote(url!) : .mock, mockLeague: remote ? nil : state.offlineLeague, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock")))
+            api = client ?? BackendAPIClient(mode: remote ? .remote(url!) : .mock, mockLeague: remote ? nil : state.offlineLeague, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock")))
             replayAPI = BackendAPIClient(mode: remote ? .remote(url!) : .mock, demoOnly: true, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock") + "#isolated-replay"))
             remoteURL = baseURL
             clearProgress(); isRemote = remote; identity = nil; league = nil; standings = []
@@ -376,7 +378,16 @@ final class BackendViewModel: ObservableObject {
     func refreshLeague() async {
         await run {
             guard let userID = identity?.userID, let id = league?.crew_id ?? state.leagueByUser[key(userID)] else { return }
-            let loaded = try await api.league(id: id)
+            let loaded: APILeague
+            do { loaded = try await api.league(id: id) }
+            catch let error as BackendError where error.isStalePrivateLeague {
+                // Only this exact GET /crews/{id} refusal invalidates this account's cached ID.
+                state.leagueByUser.removeValue(forKey: key(userID))
+                league = nil; standings = []; leaderboardIsDemo = false
+                try persist()
+                notice = "Create or join a league."
+                return
+            }
             league = loaded
             if loaded.canRank {
                 let board = try await api.leaderboard(id: id)

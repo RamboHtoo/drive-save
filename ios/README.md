@@ -87,7 +87,7 @@ swiftc -module-cache-path /tmp/drive-save-module-cache \
 
 `python3 Tests/production_smoke.py` is an explicit live test that creates only dedicated test users and an inactive test league. It never logs/writes tokens or resets/deletes existing data. Do not run it as a routine offline unit test.
 
-Physical driving accuracy and uninterrupted background recording are not validated or claimed. The remote EPA catalog is available through My Vehicle; no full dataset is bundled. Automatic background sync and validation of physical driving remain outside this implementation. [Genuine recording contract and handoff](Docs/GenuineRecordingContract.md) describes the recording metadata, account/vehicle snapshots, offline Swift/Python compatibility tests, and backend changes still required before button-boundary recordings can score.
+Physical driving accuracy and uninterrupted background recording are not validated or claimed. The remote EPA catalog is available through My Vehicle; no full dataset is bundled. Automatic background sync and validation of physical driving remain outside this implementation. [Genuine recording contract and handoff](Docs/GenuineRecordingContract.md) describes the recording metadata, account/vehicle snapshots, offline Swift/Python compatibility tests, and observed GPS-window eligibility, required shared-contract clarification, and physical validation still pending.
 
 ## Integration verification
 

@@ -37,6 +37,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
     private var gpsPoints: [GPSPoint] = []
     private var interruptions: [String] = []
     private var gpsFilter = GPSDistanceFilter()
+    private var telemetrySpeed: LiveTelemetryInput.Speed?
     private var lastLocation: CLLocation?
     private var clientTripID: UUID?
     private var speedSamples: [APISpeedSample] = []
@@ -47,7 +48,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
     private var endedUptime: Double?
     private var recordingContext: RecordingContext?
     private var detectorCoverage = DetectorCoverage(startedUptime: 0)
-    private var locationWasUnavailable = false
+    private var gpsQualityTracker: GPSQualityTracker?
+    private var latestDetectorGPS: APISpeedSample?
+    private var gpsQualitySummary: GPSQualitySummary? { gpsQualityTracker?.summary(through: endedAt ?? Date()) }
+    private var locationWasUnavailable: Bool { gpsQualitySummary?.isPartial == true }
     private var hasMotion = false
     private var demoTick = 0
     private var calibrationTicks = 0
@@ -70,6 +74,24 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
     var distanceLabel: String { distanceAvailable ? String(format: "%.2f mi", distanceMiles) : "Unavailable" }
+    /// Read-only presentation projection. Does not touch raw samples or detector filtering.
+    func liveTelemetryInput(mountingConfirmed: Bool) -> LiveTelemetryInput {
+        let vehicleAxesValid = mountingConfirmed && isCalibrated && !orientationChanged
+        let acceleration = latestMotion.map { sample in
+            let vehicleForward: Double?
+            let vehicleLateral: Double?
+            if vehicleAxesValid && mode == .device {
+                vehicleForward = sample.userAcceleration.dot(forward)
+                vehicleLateral = sample.userAcceleration.dot(lateral)
+            } else if vehicleAxesValid && mode == .simulator {
+                // The existing, explicitly synthetic fixture defines y=forward, x=lateral.
+                vehicleForward = sample.userAcceleration.y
+                vehicleLateral = sample.userAcceleration.x
+            } else { vehicleForward = nil; vehicleLateral = nil }
+            return LiveTelemetryInput.Acceleration(timestamp: sample.timestamp, deviceG: sample.userAcceleration, vehicleForwardG: vehicleForward, vehicleLateralG: vehicleLateral)
+        }
+        return LiveTelemetryInput(isRecording: isRecording, speed: telemetrySpeed, acceleration: acceleration, elapsedSeconds: elapsedSeconds, distanceMiles: distanceAvailable ? distanceMiles : nil, isSynthetic: mode == .simulator || softwareSimulatedGPS)
+    }
     var accuracyLabel: String { gpsAccuracyMeters.map { String(format: "±%.0f m · latest reported", $0) } ?? "Waiting for GPS accuracy" }
     var detectionStatus: String {
         if mode == .walking { return "Disabled by design · Walking Test. No driving events or fuel estimates." }
@@ -78,10 +100,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         if !hasMotion { return "Disabled · device motion unavailable. GPS can continue." }
         if !isCalibrated { return "Disabled · mount not calibrated. GPS can continue." }
         if !isLocationAuthorized { return "Disabled · location permission unavailable; GPS speed is required." }
-        guard let lastLocation, abs(lastLocation.timestamp.timeIntervalSinceNow) < 5 else {
-            return "Paused · calibration valid; waiting for recent GPS speed."
+        guard let speed = detectionSpeed(at: Date()) else {
+            return "Paused · waiting for fresh GPS speed with valid accuracy."
         }
-        if lastLocation.speed < 2 { return "Paused · calibration valid; below driving speed or GPS speed unavailable." }
+        if speed < 2 { return "Monitoring · fresh low-speed GPS; harsh-event classification suppressed." }
         return "Active · calibration valid and recent GPS speed available. Candidate events are unvalidated."
     }
     var calibrationLabel: String {
@@ -102,6 +124,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
 
     func prepare(mode: Mode) {
         stopHardware()
+        telemetrySpeed = nil; latestDetectorGPS = nil
         self.mode = mode
         isCalibrated = false
         calibrationRequested = false
@@ -159,8 +182,11 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         calibrationRequested = false
         if !isCalibrated { motion.stopDeviceMotionUpdates() }
         clientTripID = UUID(); speedSamples = []; softwareSimulatedGPS = false
+        telemetrySpeed = nil
         startedAt = Date(); startedUptime = ProcessInfo.processInfo.systemUptime
         endedAt = nil; endedUptime = nil; recordingContext = context
+        gpsQualityTracker = GPSQualityTracker(startedAt: startedAt!)
+        latestDetectorGPS = nil
         detectorCoverage = DetectorCoverage(startedUptime: startedUptime)
         if mode != .device || !isCalibrated || !hasMotion {
             detectorCoverage.invalidate("Calibrated device detector unavailable at start")
@@ -172,7 +198,6 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         detector = CandidateEventDetector(configuration: configuration)
         isRecording = true
         gpsFilter.maximumSpeedMetersPerSecond = mode == .walking ? 12 : 65
-        locationWasUnavailable = mode != .simulator && !isLocationAuthorized
         if mode != .simulator {
             if isLocationAuthorized { location.startUpdatingLocation(); locationStatus = "Waiting for accurate GPS" }
             if mode == .walking { motionStatus = "Motion off · Walking Test uses GPS only" }
@@ -254,11 +279,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
                 filtered = filtered * (1-configuration.smoothingWeight) + acceleration * (9.80665*configuration.smoothingWeight)
                 forwardValue = filtered.dot(forward); lateralValue = filtered.dot(lateral)
                 // Require recent GPS speed evidence to reduce stationary phone-motion false positives.
-                if let lastLocation, lastLocation.speed >= 2, abs(lastLocation.timestamp.timeIntervalSinceNow) < 5 {
+                if let speed = detectionSpeed(at: observedAt), speed >= 2 {
                     events += detector.update(forward: forwardValue ?? 0, lateral: lateralValue ?? 0, uptime: sample.timestamp, date: observedAt)
-                    detectorCoverage.observe(uptime: sample.timestamp)
                 } else {
-                    detectorCoverage.invalidate("Detector paused without driving-speed GPS evidence")
+                    // Known low speed intentionally suppresses classification. Missing GPS remains unknown.
                     detector = CandidateEventDetector(configuration: configuration)
                 }
                 lastMotionUptime = sample.timestamp
@@ -266,7 +290,14 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         }
         let value = MotionSample(timestamp: observedAt, uptime: sample.timestamp, userAcceleration: acceleration, rotationRate: rotation, attitude: attitude, forwardAcceleration: forwardValue, lateralAcceleration: lateralValue)
         latestMotion = value
-        if isRecording { motionSamples.append(value) }
+        if isRecording {
+            detectorCoverage.observe(uptime: sample.timestamp, eligible: forwardValue?.isFinite == true && lateralValue?.isFinite == true && detectionSpeed(at: observedAt) != nil)
+            motionSamples.append(value)
+        }
+    }
+
+    private func detectionSpeed(at date: Date) -> Double? {
+        GPSScoringWindow.freshSpeed(latestDetectorGPS, at: date)
     }
 
     private func tick() {
@@ -275,9 +306,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         if mode == .simulator { simulateTick() }
         else if isLocationAuthorized {
             let secondsWithoutFix = lastLocation.map { Date().timeIntervalSince($0.timestamp) } ?? elapsedSeconds
-            if secondsWithoutFix > 10 {
-                locationStatus = distanceAvailable ? "GPS interrupted · saved distance is partial" : "GPS unavailable · no usable distance yet. Try outdoors."
-                locationWasUnavailable = true
+            if lastLocation != nil && secondsWithoutFix > 3 {
+                locationStatus = "GPS interrupted · saved distance is partial"
+            } else if lastLocation == nil && secondsWithoutFix > 10 {
+                locationStatus = "Waiting for the first reliable GPS fix · try outdoors."
             }
         }
     }
@@ -313,8 +345,9 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         case .denied, .restricted:
             locationStatus = distanceAvailable ? "Location denied · saved distance is partial" : "Location denied · distance unavailable"
             gpsAccuracyMeters = nil
+            telemetrySpeed = nil; latestDetectorGPS = nil
             location.stopUpdatingLocation(); lastLocation = nil
-            if isRecording { locationWasUnavailable = true; noteInterruption("Location permission unavailable; distance may be missing or partial.") }
+            if isRecording { noteInterruption("Location permission unavailable; distance may be missing or partial.") }
         case .notDetermined: locationStatus = "Location permission not requested"
         @unknown default: locationStatus = "Location unavailable"
         }
@@ -324,6 +357,12 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         guard isRecording && mode != .simulator && isLocationAuthorized else { return }
         for point in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
             if point.sourceInformation?.isSimulatedBySoftware == true { softwareSimulatedGPS = true }
+            if latestDetectorGPS == nil || point.timestamp >= latestDetectorGPS!.ts {
+                latestDetectorGPS = .init(ts: point.timestamp, sample_seq: 0, speed_mps: point.speed, speed_accuracy_mps: point.speedAccuracy)
+            }
+            if telemetrySpeed == nil || point.timestamp >= telemetrySpeed!.timestamp {
+                telemetrySpeed = .init(timestamp: point.timestamp, metersPerSecond: point.speed, accuracyMetersPerSecond: point.speedAccuracy, horizontalAccuracyMeters: point.horizontalAccuracy)
+            }
             if mode == .device, point.timestamp >= (startedAt ?? Date()), point.timestamp <= Date(), abs(point.timestamp.timeIntervalSinceNow) <= 10 {
                 if speedSamples.count < 21_600 {
                     speedSamples.append(.init(ts: point.timestamp, sample_seq: speedSamples.count, speed_mps: point.speed, speed_accuracy_mps: point.speedAccuracy))
@@ -339,25 +378,24 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
             }
             distanceMiles += update.addedMeters / 1609.344
             distanceAvailable = distanceAvailable || update.hasDistance
-            if update.gap {
-                locationWasUnavailable = true
-                noteInterruption("GPS gap; missing distance was not interpolated.")
-            }
+            gpsQualityTracker?.observe(point.timestamp)
             lastLocation = point
             gpsPoints.append(gps)
-            locationStatus = distanceAvailable ? "GPS recording · filtered distance estimate" : "GPS acquired; waiting for another valid point"
+            locationStatus = locationWasUnavailable ? "Partial GPS distance · gaps excluded" : distanceAvailable ? "GPS recording · filtered distance estimate" : "GPS acquired; waiting for another valid point"
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         guard isRecording else { return }
+        telemetrySpeed = nil
         locationStatus = distanceAvailable ? "GPS unavailable · saved distance is partial" : "GPS unavailable · no usable distance yet"
-        locationWasUnavailable = true
         let locationError = error as? CLError
         if locationError?.code == .denied {
+            latestDetectorGPS = nil
             noteInterruption("Location access was denied. Distance may be unavailable or incomplete; enable location in Settings for your next recording.")
         } else {
-            noteInterruption("GPS was temporarily unavailable. Recording continues, but some distance may be missing.")
+            // locationUnknown is advisory; actual observation timestamps determine missing coverage.
+            locationStatus = locationWasUnavailable ? "GPS unavailable · saved distance is partial" : "GPS temporarily unavailable · waiting for a reliable fix"
         }
         if let error = error as? CLError, error.code == .denied { location.stopUpdatingLocation(); lastLocation = nil }
     }
@@ -391,7 +429,12 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         let finalDetectionStatus = detectionStatus
         isRecording = false
         stopHardware()
-        let details = RecordingDetails(endedAt: endedAt ?? startedAt, elapsedSeconds: elapsedSeconds, distanceAvailable: distanceAvailable, distanceIsPartial: locationWasUnavailable, motionAvailable: hasMotion && motionSamples.contains { $0.forwardAcceleration != nil }, calibrationDescription: mode == .walking ? "Walking Test: real GPS only. No calibration, driving detection, fuel estimate, or crew scoring." : "Stationary flat mount calibration; phone top edge manually aligned with vehicle front. Candidate events require recent GPS speed ≥ 2 m/s. Thresholds are provisional.", events: events, motionSamples: motionSamples, gpsPoints: gpsPoints, interruptions: interruptions, gpsAccuracyMeters: gpsAccuracyMeters, detectionStatus: finalDetectionStatus, calibrationValidAtEnd: mode == .device ? isCalibrated : nil, measurementsIncomplete: measurementsIncomplete, speedSamples: speedSamples, eventsComplete: mode == .device && detectorCoverage.complete(through: endedUptime ?? startedUptime), detectorVersion: mode == .device ? CandidateEventDetector.version : nil, detectorCoverage: detectorCoverage)
+        let window = try? GPSScoringWindow(samples: speedSamples, startedAt: startedAt, endedAt: endedAt ?? startedAt)
+        let windowComplete = window.map {
+            detectorCoverage.complete(from: startedUptime + $0.first.timeIntervalSince(startedAt), through: startedUptime + $0.last.timeIntervalSince(startedAt))
+        } ?? false
+        let eventsComplete = mode == .device && windowComplete && !CandidateEventDetector.version.isEmpty && events.allSatisfy { $0.detectorVersion == CandidateEventDetector.version }
+        let details = RecordingDetails(endedAt: endedAt ?? startedAt, elapsedSeconds: elapsedSeconds, distanceAvailable: distanceAvailable, distanceIsPartial: locationWasUnavailable, motionAvailable: hasMotion && motionSamples.contains { $0.forwardAcceleration != nil }, calibrationDescription: mode == .walking ? "Walking Test: real GPS only. No calibration, driving detection, fuel estimate, or crew scoring." : "Stationary flat mount calibration; phone top edge manually aligned with vehicle front. Candidate events require recent GPS speed ≥ 2 m/s. Thresholds are provisional.", events: events, motionSamples: motionSamples, gpsPoints: gpsPoints, interruptions: interruptions, gpsAccuracyMeters: gpsAccuracyMeters, detectionStatus: finalDetectionStatus, calibrationValidAtEnd: mode == .device ? isCalibrated : nil, measurementsIncomplete: measurementsIncomplete, speedSamples: speedSamples, eventsComplete: eventsComplete, detectorVersion: mode == .device ? CandidateEventDetector.version : nil, detectorCoverage: detectorCoverage, observedGPSWindowComplete: windowComplete, gpsQuality: gpsQualitySummary)
         return Trip(id: UUID(), title: mode == .walking ? "Walking Test" : mode == .simulator ? "Simulator test drive" : "Recorded drive", date: startedAt, distanceMiles: distanceMiles, durationMinutes: Int(elapsedSeconds / 60), harshBraking: events.filter { $0.kind == .harshBraking }.count, rapidAcceleration: events.filter { $0.kind == .rapidAcceleration }.count, mpg: 28, fuelPrice: 3.65, modeledExcessGallons: 0, source: mode == .simulator || softwareSimulatedGPS ? .simulated : .measured, recording: details, activity: mode == .walking ? .walkingTest : .driving, clientTripID: clientTripID, recordingContext: recordingContext)
     }
 

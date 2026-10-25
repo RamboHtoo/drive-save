@@ -14,18 +14,18 @@ import Foundation
         try check(String(decoding: preciseJSON, as: UTF8.self).contains(".123456Z"), "wire timestamps preserve observed microseconds rather than snapping to milliseconds")
         try check(abs(preciseRoundTrip.timeIntervalSince(precise)) < 0.000001, "microsecond sensor timestamps survive wire decoding within backend precision")
         var coverage = DetectorCoverage(startedUptime: 100)
-        try check(!coverage.complete(through: 101), "no observations never means complete")
+        try check(!coverage.complete(from: 100, through: 101), "no observations never means complete")
         coverage.observe(uptime: 100.1); coverage.observe(uptime: 101)
-        try check(!coverage.complete(through: 101), "startup gap stays incomplete")
+        try check(!coverage.complete(from: 100, through: 101), "startup gap stays incomplete")
         var complete = DetectorCoverage(startedUptime: 100)
         for i in 0...10 { complete.observe(uptime: 100 + Double(i) / 10) }
-        try check(complete.complete(through: 101), "explicit observations spanning the interval can be complete")
-        try check(!complete.complete(through: 101.1), "shutdown gap stays incomplete")
+        try check(complete.complete(from: 100, through: 101), "explicit observations spanning the interval can be complete")
+        try check(!complete.complete(from: 100, through: 101.1), "shutdown gap stays incomplete")
         complete.observe(uptime: 103)
-        try check(!complete.complete(through: 103), "motion gap permanently invalidates completeness")
+        try check(!complete.complete(from: 100, through: 103), "motion gap permanently invalidates completeness")
         var paused = DetectorCoverage(startedUptime: 0)
         paused.observe(uptime: 0); paused.invalidate("GPS speed unavailable"); paused.observe(uptime: 1)
-        try check(!paused.complete(through: 1), "GPS/detector pause cannot become complete later")
+        try check(!paused.complete(from: 0, through: 1), "GPS/detector pause cannot become complete later")
         let fixture = try APIJSON.decoder().decode(APITripPayload.self, from: Data(contentsOf: URL(fileURLWithPath: "DriveAndSave/MockData/Backend/calculation-trip.json")))
         let row = try APIJSON.decoder().decode(VehicleRow.self, from: Data(contentsOf: URL(fileURLWithPath: "DriveAndSave/MockData/Backend/catalog-mazda5.json")))
         let owner = UUID()
@@ -52,7 +52,7 @@ import Foundation
         try APIJSON.encoder().encode(TripUploadBuilder.payload(for: persisted)).write(to: output.appendingPathComponent("complete-fixture.json"))
         // Controlled fixture models a button tap preceding the first observation. GPS values/times are untouched.
         let boundaryTrip = Trip(id: UUID(), title: "Offline boundary-gap fixture", date: fixture.started_at.addingTimeInterval(-0.1), distanceMiles: fixture.distance_mi, durationMinutes: 5, harshBraking: 0, rapidAcceleration: 0, mpg: 0, fuelPrice: 0, modeledExcessGallons: 0, source: .simulated, recording: details, clientTripID: UUID(), recordingContext: context)
-        try check(TripUploadBuilder.scoringIssue(for: boundaryTrip)?.contains("missing_boundary_speed") == true, "button-tap boundary is rejected rather than snapped to GPS")
+        try check(TripUploadBuilder.scoringIssue(for: boundaryTrip) == nil, "realistic button-to-GPS edge gap is accepted without snapping timestamps")
         let boundary = try TripUploadBuilder.payload(for: boundaryTrip)
         try check(boundary.started_at == boundaryTrip.date && boundary.speed_samples == fixture.speed_samples, "serialization preserves raw GPS and interval timestamps")
         try APIJSON.encoder().encode(boundary).write(to: output.appendingPathComponent("boundary-gap-fixture.json"))
@@ -60,6 +60,22 @@ import Foundation
         let recordedPayload = try TripUploadBuilder.payload(for: recordedModeFixture)
         try check(recordedPayload.source == "recorded" && !recordedPayload.is_demo, "recorded-mode serializer preserves genuine provenance; backend experimental policy stays server-side")
         try APIJSON.encoder().encode(recordedPayload).write(to: output.appendingPathComponent("recorded-mode-fixture.json"))
+        // Extend only controlled button times; retain every existing fixture measurement unchanged.
+        func writeCase(_ name: String, lead: Double, tail: Double, samples: [APISpeedSample]) throws {
+            let begin = fixture.started_at.addingTimeInterval(-lead), end = fixture.ended_at.addingTimeInterval(tail)
+            let value = APITripPayload(client_trip_id: UUID(), started_at: begin, ended_at: end, distance_mi: fixture.distance_mi, avg_speed_mph: fixture.distance_mi / (end.timeIntervalSince(begin) / 3600), source: "replayed", is_demo: true, events: [], speed_samples: samples, events_complete: true, detector_version: CandidateEventDetector.version)
+            try TripUploadBuilder.validate(value)
+            try APIJSON.encoder().encode(value).write(to: output.appendingPathComponent(name + ".json"))
+        }
+        try writeCase("asynchronous-fixture", lead: 0.625, tail: 0.375, samples: fixture.speed_samples)
+        try writeCase("three-second-edges-fixture", lead: 3, tail: 3, samples: fixture.speed_samples)
+        try writeCase("excess-edge-fixture", lead: 3.01, tail: 0, samples: fixture.speed_samples)
+        let sparse = fixture.speed_samples.enumerated().filter { $0.offset % 2 == 1 || $0.offset == 0 || $0.offset == fixture.speed_samples.count - 1 }.map(\.element)
+        try writeCase("sparse-fixture", lead: 0, tail: 0, samples: sparse)
+        let gapSamples = fixture.speed_samples.filter { let t = $0.ts.timeIntervalSince(fixture.started_at); return t < 100 || t > 105 }
+        try writeCase("interior-gap-fixture", lead: 0, tail: 0, samples: gapSamples)
+        let inaccurate = fixture.speed_samples.map { APISpeedSample(ts: $0.ts, sample_seq: $0.sample_seq, speed_mps: $0.speed_mps, speed_accuracy_mps: 3) }
+        try writeCase("inaccurate-fixture", lead: 0, tail: 0, samples: inaccurate)
         details.eventsComplete = false; trip.recording = details
         try APIJSON.encoder().encode(TripUploadBuilder.payload(for: trip)).write(to: output.appendingPathComponent("incomplete-fixture.json"))
         details.detectorVersion = nil; details.eventsComplete = nil; trip.recording = details

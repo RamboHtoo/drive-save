@@ -175,6 +175,12 @@ struct APIReceipt: Codable, Hashable {
     var vehicle: String? = nil
     var label: String? = nil
     var notes: [String]? = nil
+    var scored_distance_mi: Double? = nil
+    var scoring_started_at: Date? = nil
+    var scoring_ended_at: Date? = nil
+    var scoring_duration_seconds: Double? = nil
+    var monetary_scope: String? = nil
+    var quality_flags: [String]? = nil
 }
 struct APILeagueMember: Codable, Identifiable { let user_id: UUID; let nickname: String; let joined_at: Date; var id: UUID { user_id } }
 struct APILeague: Codable, Identifiable {
@@ -220,7 +226,18 @@ struct APIErrorEnvelope: Decodable {
 }
 enum BackendError: LocalizedError {
     case server(Int, APIErrorEnvelope.Body?), invalidResponse, invalidInput(String), expiredSession, keychain(Int32)
+    var isStalePrivateLeague: Bool {
+        if case .server(403, let body) = self { return body?.code == "forbidden" }
+        return false
+    }
+    var consumerMessage: String? {
+        if case .server(409, let body) = self, body?.code == "mixed_trip_sources" {
+            return "Recorded trips and synthetic or replayed trips require separate accounts. Use Test Calculation in Developer Mode for demos; it keeps a separate test account."
+        }
+        return nil
+    }
     var errorDescription: String? {
+        if let consumerMessage { return consumerMessage }
         switch self {
         case .server(let status, let body):
             let prefix = body?.code == "trip_not_scored" ? "Trip not scored. No estimate was produced. " : status == 409 ? "Trip conflict. The saved upload was not changed. " : status == 422 ? "Validation failed. " : ""

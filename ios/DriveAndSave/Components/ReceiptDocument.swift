@@ -59,9 +59,12 @@ struct BackendReceiptCard: View {
                 Text(receipt.vehicle ?? "Not reported").font(.headline).accessibilityIdentifier("calculationPricingVehicle")
                 FinancialNumber(value: receipt.avoidable_cost_usd.receiptDollars, ink: DS.background)
                 Text(syntheticCalculation ? "Estimated avoidable fuel cost" : "Estimated fuel impact").font(.headline)
-                if syntheticCalculation, let label = receipt.label { Text(label).font(.subheadline) }
+                if let label = receipt.label { Text(label).font(.subheadline) }
                 if syntheticCalculation { Text("Model: \(receipt.cost_model)").font(.caption.monospaced()).accessibilityIdentifier("calculationModel") }
             }.accessibilityElement(children: .contain).accessibilityIdentifier("serverReceiptDocument")
+            if receipt.monetary_scope == "observed_gps_window", let miles = receipt.scored_distance_mi {
+                ReceiptLedgerLine(label: "GPS-covered distance", value: String(format: "%.2f mi", miles))
+            }
             if let highSpeedCost = receipt.high_speed_cost_usd { ReceiptLedgerLine(label: "High-speed portion", value: highSpeedCost.receiptDollars) }
             VStack(alignment: .leading, spacing: 16) {
                 Eyebrow(text: "Cost breakdown")
@@ -86,8 +89,8 @@ struct BackendReceiptCard: View {
                                 MeasurementRule()
                             }
                         }
-                        ForEach(receipt.notes ?? [], id: \.self) { note in Text(note).font(.caption).foregroundStyle(DS.secondary) }
                     }
+                    ForEach(receipt.notes ?? [], id: \.self) { note in Text(note).font(.caption).foregroundStyle(DS.secondary) }
                 }.accessibilityIdentifier("pricingAssumptions")
                 Text("Experimental estimate; actual fuel use and costs may differ. No savings are guaranteed.").font(.caption).foregroundStyle(DS.secondary)
                 if showDetailsLink && syntheticCalculation {

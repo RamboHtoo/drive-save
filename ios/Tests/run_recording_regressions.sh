@@ -19,7 +19,10 @@ run_suite backend "${common[@]}" "$models/VehicleCatalogModels.swift" "$models/L
 run_suite vehicles "${common[@]}" "$models/VehicleCatalogModels.swift" "${api[@]}" DriveAndSave/ViewModels/VehiclePickerViewModel.swift Tests/VehicleCatalogTests.swift
 run_suite calculation "${common[@]}" "$models/VehicleCatalogModels.swift" "$models/TestCalculationModels.swift" "${api[@]}" "$services/TestCalculationService.swift" DriveAndSave/ViewModels/TestCalculationViewModel.swift Tests/TestCalculationTests.swift
 run_suite history "${common[@]}" "$models/TripExportPayload.swift" "$services/TripStore.swift" "$services/APIClient.swift" DriveAndSave/MockData/DemoData.swift DriveAndSave/ViewModels/AppViewModel.swift Tests/TripHistoryTests.swift
+run_suite leagues "${common[@]}" "$models/VehicleCatalogModels.swift" "$models/TestCalculationModels.swift" "${api[@]}" "$services/TestCalculationService.swift" DriveAndSave/ViewModels/BackendViewModel.swift Tests/LeagueIntegrationTests.swift
 run_suite recording "${common[@]}" "$services/TripUploadBuilder.swift" Tests/RecordingContractTests.swift
+run_suite v2 "${common[@]}" Tests/V2IntegrationTests.swift
+run_suite telemetry "${common[@]}" "$models/LiveTelemetry.swift" Tests/LiveTelemetryTests.swift
 if [ "$#" -gt 0 ]; then
     "${PYTHON:-python3}" Tests/check_recording_compatibility.py --backend "$1"
 fi
