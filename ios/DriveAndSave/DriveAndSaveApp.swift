@@ -16,6 +16,7 @@ struct DriveAndSaveApp: App {
 struct RootView: View {
     @EnvironmentObject private var model: AppViewModel
     @EnvironmentObject private var backend: BackendViewModel
+    @State private var selectedDestination: PrimaryDestination = .home
     var body: some View {
         Group {
             if backend.isRestoringAccount {
@@ -32,12 +33,16 @@ struct RootView: View {
         } message: { Text(backend.recoveryMessage ?? "") }
     }
     private var appTabs: some View {
-        TabView {
-            NavigationStack { HomeView() }.tabItem { Label("Home", systemImage: "square.grid.2x2.fill") }
-            NavigationStack { CrewLeaderboardView() }.tabItem { Label("Leagues", systemImage: "person.3.fill") }
-            NavigationStack { TripHistoryView() }.tabItem { Label("History", systemImage: "chart.xyaxis.line") }
+        NavigationStack {
+            Group {
+                switch selectedDestination {
+                case .home: HomeView()
+                case .leagues: CrewLeaderboardView()
+                case .history: TripHistoryView()
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { PrimaryNavigation(selection: $selectedDestination) }
         }
-        .toolbarBackground(DS.background, for: .tabBar)
         .task { await model.load() }
         .overlay { if model.isLoading && model.trips.isEmpty { ProgressView("Loading your drives…").padding(24).background(DS.card, in: RoundedRectangle(cornerRadius: 20)) } }
         .alert("Unable to load drives", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {

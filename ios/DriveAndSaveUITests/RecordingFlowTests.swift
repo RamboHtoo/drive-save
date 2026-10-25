@@ -8,13 +8,13 @@ final class ScrollLayoutTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--isolated-api-test"]
         app.launchOffline()
-        app.tabBars.buttons["Leagues"].tap()
+        app.openMain("Leagues")
 
         let status = app.staticTexts["Offline mock user registered. No network request was made."]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         // Reach the actual content end, including wrapped status text, on any screen size.
         for _ in 0..<4 { app.scrollViews.firstMatch.swipeUp() }
-        let tabBar = app.tabBars.firstMatch
+        let tabBar = app.otherElements["primaryNavigation"]
         XCTAssertTrue(status.isHittable)
         XCTAssertGreaterThan(status.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         XCTAssertLessThanOrEqual(status.frame.maxY, tabBar.frame.minY,
@@ -29,9 +29,9 @@ final class ScrollLayoutTests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.tabBars.buttons["History"].tap()
+        app.openMain("History")
         XCTAssertTrue(app.navigationBars["Trip history"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Home"].tap()
+        app.openMain("Home")
         XCTAssertTrue(app.buttons["startTrip"].exists)
     }
 }
@@ -47,12 +47,14 @@ final class RecordingFlowTests: XCTestCase {
         let simulated = app.segmentedControls.buttons["Demo Drive"]
         XCTAssertTrue(simulated.waitForExistence(timeout: 5))
         simulated.tap()
-        app.switches["mountConfirmed"].tap()
+        app.confirmParkedMount()
         let calibrate = app.buttons["calibrate"]
         if !calibrate.isHittable { app.swipeUp() }
+        app.scrollFullyIntoView(calibrate)
         calibrate.tap()
         let start = app.buttons["beginRecording"]
         if !start.isHittable { app.swipeUp() }
+        app.scrollFullyIntoView(start)
         start.tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         // The deterministic source produces acceleration, braking and turn candidates in 12 seconds.
@@ -66,16 +68,31 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Simulator test drive"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Estimate pending"].exists)
         XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].exists)
+        let timeline = app.otherElements["tripTimeline"].firstMatch
+        XCTAssertTrue(timeline.exists)
+        for _ in 0..<12 {
+            let top = app.navigationBars.firstMatch.frame.maxY
+            if timeline.frame.minY > top && timeline.frame.minY < top + 100 { break }
+            let up = timeline.frame.minY >= top + 100
+            let scroll = app.scrollViews.firstMatch
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.7 : 0.4))
+                .press(forDuration: 0.1, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.4 : 0.7)))
+        }
+        let plot = XCTAttachment(screenshot: app.screenshot()); plot.name = "Synthetic GPS and candidate event timeline"; plot.lifetime = .keepAlways; add(plot)
+        app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Trip saved on this iPhone"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch.tap()
+        XCTAssertTrue(app.buttons["startTrip"].waitForExistence(timeout: 5))
         app.terminate()
         app.launchOffline()
-        app.tabBars.buttons["History"].tap()
+        app.openMain("History")
         for _ in 0..<3 where !app.staticTexts["Simulator test drive"].firstMatch.isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["Simulator test drive"].firstMatch.exists)
         app.staticTexts["Simulator test drive"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Estimate pending"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Leagues"].tap()
-        XCTAssertTrue(app.staticTexts["Less waste.\nMore bragging rights."].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Home"].tap()
+        app.openMain("Leagues")
+        XCTAssertTrue(app.staticTexts["leagueHeadline"].waitForExistence(timeout: 5))
+        app.openMain("Home")
         XCTAssertTrue(app.staticTexts["Drive Save"].waitForExistence(timeout: 5))
     }
 
@@ -85,8 +102,9 @@ final class RecordingFlowTests: XCTestCase {
         app.launchOffline()
         app.buttons["startTrip"].tap()
         app.segmentedControls.buttons["Demo Drive"].tap()
-        app.switches["mountConfirmed"].tap()
+        app.confirmParkedMount()
         app.swipeUp()
+        app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         XCUIDevice.shared.press(.home)
@@ -97,17 +115,19 @@ final class RecordingFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testLeavingRecordingTabEndsCapture() throws {
+    func testRecordingHasFocusedNavigationAndStillEndsOnInterruption() throws {
         let app = XCUIApplication()
         app.launchOffline()
         app.buttons["startTrip"].tap()
         app.segmentedControls.buttons["Demo Drive"].tap()
-        app.switches["mountConfirmed"].tap()
+        app.confirmParkedMount()
         app.swipeUp()
+        app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Leagues"].tap()
-        app.tabBars.buttons["Home"].tap()
+        XCTAssertFalse(app.buttons["nav-Home"].exists)
+        XCUIDevice.shared.press(.home)
+        app.activate()
         XCTAssertTrue(app.staticTexts["Recording ended"].waitForExistence(timeout: 5))
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["Estimate pending"].waitForExistence(timeout: 5))
@@ -126,8 +146,9 @@ final class RecordingFlowTests: XCTestCase {
             if deny.waitForExistence(timeout: 5) { deny.tap() }
         }
         XCTAssertTrue(app.staticTexts["Location denied · distance unavailable"].waitForExistence(timeout: 5))
-        app.switches["mountConfirmed"].tap()
+        app.confirmParkedMount()
         app.swipeUp()
+        app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Unavailable"].exists)
@@ -145,11 +166,11 @@ final class WalkingFlowTests: XCTestCase {
     func testWalkingDeniedSavesReloadsAndExcludesDrivingAndCrew() throws {
         let app = XCUIApplication()
         app.launchOffline()
-        app.tabBars.buttons["Leagues"].tap()
+        app.openMain("Leagues")
         let rankingPredicate = NSPredicate(format: "label MATCHES %@", "[0-9]+% improvement")
         let before = app.staticTexts.matching(rankingPredicate).allElementsBoundByIndex.map(\.label)
         XCTAssertFalse(before.isEmpty)
-        app.tabBars.buttons["Home"].tap()
+        app.openMain("Home")
         app.buttons["startTrip"].tap()
         app.segmentedControls.buttons["Walking Test"].tap()
         XCTAssertTrue(app.staticTexts["Walking GPS Test"].exists)
@@ -162,20 +183,22 @@ final class WalkingFlowTests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["Location denied · distance unavailable"].waitForExistence(timeout: 5))
         if !app.buttons["beginRecording"].isHittable { app.swipeUp() }
+        app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Disabled"].exists)
         XCTAssertTrue(app.staticTexts["Unavailable"].exists)
         let stop = app.buttons["stopTrip"]
         for _ in 0..<5 where !stop.isHittable { app.swipeUp() }
-        XCTAssertLessThanOrEqual(stop.frame.maxY, app.tabBars.firstMatch.frame.minY, "Save control must stay above the native tab bar")
+        XCTAssertFalse(app.buttons["nav-Home"].exists, "Recording is a focused secondary destination")
+        XCTAssertLessThanOrEqual(stop.frame.maxY, app.frame.maxY, "Save control must remain within the screen")
         stop.tap()
         XCTAssertTrue(app.staticTexts["No fuel estimate"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Estimate pending"].exists)
         XCTAssertFalse(app.staticTexts["Driving moments"].exists)
         app.terminate()
         app.launchOffline()
-        app.tabBars.buttons["History"].tap()
+        app.openMain("History")
         let filter = app.switches["includeWalkingTests"]
         let viewport = app.scrollViews.firstMatch
         func nudge(up: Bool) {
@@ -207,7 +230,7 @@ final class WalkingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Walking Test"].firstMatch.exists)
         app.staticTexts["Walking Test"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["No fuel estimate"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Leagues"].tap()
+        app.openMain("Leagues")
         let after = app.staticTexts.matching(rankingPredicate).allElementsBoundByIndex.map(\.label)
         XCTAssertEqual(before, after)
     }
@@ -224,6 +247,7 @@ final class WalkingGPSRouteTests: XCTestCase {
         app.buttons["startTrip"].tap()
         app.segmentedControls.buttons["Walking Test"].tap()
         if !app.buttons["beginRecording"].isHittable { app.swipeUp() }
+        app.scrollFullyIntoView(app.buttons["beginRecording"])
         app.buttons["beginRecording"].tap()
         XCTAssertTrue(app.staticTexts["Recording · foreground only"].waitForExistence(timeout: 5))
         let distance = NSPredicate { _, _ in
@@ -266,7 +290,8 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["PLACEHOLDER PRICING"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["cost_model: flat_per_event"].exists)
         XCTAssertTrue(app.staticTexts["is_estimate: true"].exists)
-        app.tabBars.buttons["Leagues"].tap()
+        let receipt = XCTAttachment(screenshot: app.screenshot()); receipt.name = "Placeholder server receipt"; receipt.lifetime = .keepAlways; add(receipt)
+        app.openMain("Leagues")
         app.buttons["Create League"].tap()
         app.textFields["leagueName"].tap(); app.textFields["leagueName"].typeText("Offline Test League")
         app.buttons["createLeague"].tap()
@@ -303,7 +328,37 @@ final class RemoteAuthenticationTests: XCTestCase {
 }
 
 /// Every offline test uses a fresh Keychain/local API namespace, never an existing driver account.
-private extension XCUIApplication {
+extension XCUIApplication {
+    @MainActor
+    func scrollFullyIntoView(_ element: XCUIElement) {
+        for _ in 0..<18 {
+            let upper = navigationBars.firstMatch.exists ? navigationBars.firstMatch.frame.maxY : 60
+            let lower = buttons["nav-Home"].exists ? otherElements["primaryNavigation"].frame.minY : frame.maxY - 24
+            if element.frame.minY > upper + 4 && element.frame.maxY < lower - 4 { break }
+            let up = element.frame.maxY >= lower - 4
+            let scroll = scrollViews.firstMatch
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.7 : 0.4))
+                .press(forDuration: 0.1, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.4 : 0.7)))
+        }
+    }
+    @MainActor
+    func confirmParkedMount() {
+        let toggle = switches["mountConfirmed"]
+        scrollFullyIntoView(toggle)
+        if toggle.value as? String == "0" { toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() }
+        XCTAssertEqual(toggle.value as? String, "1")
+    }
+    @MainActor
+    func openMain(_ name: String) {
+        let destination = buttons["nav-" + name]
+        for _ in 0..<8 where !destination.exists {
+            let back = navigationBars.buttons.matching(identifier: "BackButton").firstMatch
+            guard back.exists else { break }
+            back.tap()
+        }
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+    }
     @MainActor
     func launchOffline() {
         if !launchArguments.contains(where: { $0.hasPrefix("--account-test-id=") }) {
@@ -312,9 +367,18 @@ private extension XCUIApplication {
         launch()
         let nickname = textFields["welcomeNickname"]
         if nickname.waitForExistence(timeout: 3) {
-            nickname.tap(); nickname.typeText("HackPSU Demo")
+            nickname.tap(); nickname.typeText("HackPSU Demo\n")
             switches["offlineOnboarding"].tap()
-            buttons["welcomeRegister"].tap()
+            let register = buttons["welcomeRegister"]
+            for _ in 0..<12 {
+                let upper = navigationBars.firstMatch.frame.maxY
+                if register.frame.minY > upper && register.frame.maxY < frame.maxY - 24 { break }
+                let scroll = scrollViews.firstMatch
+                let up = register.frame.maxY >= frame.maxY - 24
+                scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.7 : 0.4))
+                    .press(forDuration: 0.1, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.4 : 0.7)))
+            }
+            register.tap()
             XCTAssertTrue(buttons["startTrip"].waitForExistence(timeout: 10))
         }
     }

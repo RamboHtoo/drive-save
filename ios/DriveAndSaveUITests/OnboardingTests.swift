@@ -19,7 +19,7 @@ final class OnboardingTests: XCTestCase {
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, "Walking Buddy")
         let originalID = app.staticTexts["profileUserID"].label
-        app.tabBars.buttons["Leagues"].tap()
+        app.openMain("Leagues")
         app.buttons["Create League"].tap()
         app.textFields["leagueName"].tap(); app.textFields["leagueName"].typeText("Four Friends")
         app.buttons["createLeague"].tap()
@@ -39,7 +39,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Four Friends"].waitForExistence(timeout: 5))
         let reset = app.buttons["resetTestAccount"]
         for _ in 0..<4 { app.scrollViews.firstMatch.swipeUp() }
-        XCTAssertLessThanOrEqual(reset.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        XCTAssertFalse(app.buttons["nav-Home"].exists)
+        XCTAssertLessThanOrEqual(reset.frame.maxY, app.frame.maxY)
         reset.tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()

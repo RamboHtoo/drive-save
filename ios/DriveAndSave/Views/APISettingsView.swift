@@ -48,7 +48,7 @@ struct APISettingsView: View {
             Surface {
                 Eyebrow(text: "Contract demo replay")
                 Text("Uploads the backend's sample trip as source=replayed and is_demo=true. Requires registration and a vehicle. It uses a separate replay identity that cannot join leagues; it never uploads under your competition identity.").font(.subheadline).foregroundStyle(DS.secondary)
-                Button("Upload / retry demo replay") { Task { await backend.replayContractFixture() } }.buttonStyle(.borderedProminent).accessibilityIdentifier("uploadReplay")
+                Button("Upload / retry demo replay") { Task { await backend.replayContractFixture() } }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("uploadReplay")
                 if let receipt = backend.replayReceipt { BackendReceiptCard(receipt: receipt, mock: !backend.isRemote) }
             }
             BackendStatusView()
@@ -80,39 +80,6 @@ struct BackendStatusView: View {
     }
 }
 
-struct BackendReceiptCard: View {
-    let receipt: APIReceipt
-    let mock: Bool
-    var body: some View {
-        Surface {
-            Eyebrow(text: mock ? "Offline mock receipt" : "Server receipt")
-            if receipt.is_demo { Label("DEMO · EXCLUDED FROM REAL COMPETITION", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(DS.mint) }
-            Text(receipt.avoidable_cost_usd.dollars).font(.system(size: 44, weight: .bold, design: .rounded)).foregroundStyle(DS.mint)
-            if receipt.cost_model == "flat_per_event" {
-                Text("PLACEHOLDER PRICING").font(.headline).foregroundStyle(.orange)
-                Text("Flat pricing per candidate event. This amount is not measured fuel waste or achieved savings.").font(.subheadline)
-            }
-            Text("cost_model: \(receipt.cost_model)").font(.caption).foregroundStyle(DS.secondary)
-            Text("is_estimate: \(receipt.is_estimate ? "true" : "false")").font(.caption).foregroundStyle(DS.secondary)
-            Text("Server distance: \(receipt.distance_mi, specifier: "%.2f") mi").font(.subheadline)
-            ForEach(Array(receipt.events.enumerated()), id: \.offset) { _, event in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text(event.type); Spacer(); Text(event.cost_usd.dollars) }.font(.subheadline)
-                    Text("\(event.ts.formatted(date: .omitted, time: .standard)) · \(event.speed_before_mph, specifier: "%.1f") → \(event.speed_after_mph, specifier: "%.1f") mph").font(.caption).foregroundStyle(DS.secondary)
-                }
-            }
-            Eyebrow(text: "Assumptions")
-            ForEach(Array(receipt.assumptions.enumerated()), id: \.offset) { _, assumption in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(assumption.key): \(assumption.value.formatted()) \(assumption.unit)")
-                    Text("As of \(assumption.as_of) · \(assumption.is_estimate ? "team estimate" : "published input")").foregroundStyle(DS.secondary)
-                    if let source = assumption.source_url, let url = URL(string: source), ["https", "http"].contains(url.scheme ?? "") { Link("Source", destination: url) }
-                }.font(.caption)
-            }
-        }
-    }
-}
-
 struct TripUploadSection: View {
     let trip: Trip
     @EnvironmentObject private var backend: BackendViewModel
@@ -123,7 +90,7 @@ struct TripUploadSection: View {
                 Text(reason).font(.subheadline).foregroundStyle(DS.secondary)
             } else {
                 Text(trip.source == .simulated ? "Demo replay upload · excluded from real competition" : "Recorded sensor trip · detector accuracy remains unvalidated").font(.caption).foregroundStyle(DS.secondary)
-                Button("Upload / retry & fetch receipt") { Task { await backend.upload(trip: trip) } }.buttonStyle(.borderedProminent).disabled(backend.isBusy)
+                Button("Upload / retry & fetch receipt") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             }
             NavigationLink("API & Vehicle setup") { APISettingsView() }
             BackendStatusView()

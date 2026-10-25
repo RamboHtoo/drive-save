@@ -1,12 +1,12 @@
 # Drive Save — iOS
 
-Native SwiftUI app, iOS 17+, dark navy/mint design. Work stays inside `/ios`.
+Native SwiftUI app, iOS 17+, carbon black / acid lime / warm white design. Work stays inside `/ios`.
 
 ## Run
 
 Open `DriveAndSave.xcodeproj`, choose the **DriveAndSave** scheme and an iPhone under **Simulators**, then ⌘R. For a physical iPhone, choose your signing team/device. No external packages are required. Remote sign-in requires a signed app with generated Keychain entitlements; use normal Xcode Run, not CODE_SIGNING_ALLOWED=NO.
 
-Tabs: Home, Leagues, History. Home costs/charts remain clearly labeled demo data. Local trips and walking tests persist across app restarts.
+Root destinations: Home, Leagues, History, using an intrinsic-height safe-area navigation rail. Secondary screens have no primary navigation bar. Home costs/charts remain clearly labeled demo data. Local trips and walking tests persist across app restarts.
 
 ## Walking and driving
 
@@ -16,7 +16,7 @@ Walking Test uses Core Location only; no mount/calibration, driving events, or f
 
 Driving requires a securely mounted, flat phone, screen up and top edge forward. Calibrate while parked, then start before moving. Orientation changes disable detection. Candidate driving events remain unvalidated. Demo Drive generates synthetic inputs and is labeled accordingly.
 
-All recording is foreground only. Locking, leaving the app or switching tabs ends capture; return to save. Unsaved sessions may be lost on process termination. Do not interact while driving. GPS quality, gaps and incomplete measurements are shown. Shared screens respect the native tab bar safe area and add a bottom scroll-content margin, so final messages and save controls can scroll above the floating bar without an empty fixed-height band.
+All recording is foreground only. Locking or leaving the app ends capture; return to save. Unsaved sessions may be lost on process termination. Do not interact while driving. GPS quality, gaps and incomplete measurements are shown. The root rail uses safeAreaInset, with a vertical layout at accessibility text sizes. Home has a safe-area masthead. Secondary screens use native back navigation; recording has no main navigation rail. Final messages and save controls stay scrollable without floating overlays.
 
 ## Backend setup
 
@@ -105,3 +105,7 @@ All eight distinct UI flows passed in batches, including Walking Test filtering/
 - Nine distinct UI flows passed in batches: welcome/persistence/reset; Leagues footer layout; vehicle/replay/league; four driving flows; remote welcome/Keychain relaunch; Walking Test persistence/filtering/unchanged standings. The initial reset confirmation popover lacked a visible Cancel action on the test runtime; it was replaced with an explicit Cancel/Reset alert and the flow passed.
 - Live API checks passed with four new dedicated accounts in one league, member counts 1→4, unique/restored user IDs, matching member leaderboards, and no invented ranks. No trips were uploaded by those four accounts.
 - Four physical iPhones and real driving baselines were not tested here. Home financial charts remain demo data; recording accuracy and the server cost-model limitations above remain unchanged.
+
+## Visual redesign
+
+Home, Leagues, and Trip Receipt were redesigned and verified as separate stages. See [VisualDesign.md](Docs/VisualDesign.md) for tokens, behavior, modified-file inventory, verification results, and remaining visual scope. Reusable components provide scaled condensed system typography, strong-contrast primary actions, ruled sections, an original Canvas lane illustration, honest GPS observation charts, compact individual standings, and a warm-white itemized receipt. Demo/pending/placeholder financial disclosures remain explicit. Existing authentication, Core Motion, Core Location, trip serialization, persistence, scoring, and backend contracts are unchanged.

@@ -11,21 +11,27 @@ struct TripReceiptView: View {
             else { Label("RECORDED · DEVICE SENSORS", systemImage: "sensor.fill").font(.caption.bold()).foregroundStyle(DS.mint) }
             VStack(alignment: .leading, spacing: 8) {
                 Eyebrow(text: trip.isWalkingTest ? "GPS test receipt" : "Your trip, itemized")
-                Text(trip.displayTitle).font(.largeTitle.bold())
+                DisplayType(trip.displayTitle, size: 40).accessibilityAddTraits(.isHeader)
                 Text(trip.date.formatted(date: .abbreviated, time: .omitted)).foregroundStyle(DS.secondary)
             }
             if let receipt = backend.receipt(for: trip) { BackendReceiptCard(receipt: receipt, mock: !backend.isRemote) }
-            Surface {
-                Image(systemName: trip.isWalkingTest ? "figure.walk" : "leaf.fill").font(.largeTitle).foregroundStyle(DS.mint)
-                Text(backend.receipt(for: trip) != nil ? "Local recording summary" : trip.isWalkingTest ? "No fuel estimate" : trip.hasEstimate ? trip.avoidableCost.dollars : "Estimate pending")
-                    .font(.system(size: trip.hasEstimate ? 52 : 30, weight: .bold, design: .rounded)).foregroundStyle(DS.mint)
-                Text(trip.isWalkingTest ? "Walking Test · excluded from driving and league rankings" : backend.receipt(for: trip) != nil ? "Recorded trip details" : "Modeled avoidable fuel cost").font(.headline)
-                HStack {
-                    Metric(value: trip.distanceLabel, label: "distance")
-                    Metric(value: trip.durationLabel, label: "duration")
-                    if !trip.isWalkingTest { Metric(value: trip.eventCountLabel, label: "candidate events") }
+            if backend.receipt(for: trip) == nil {
+                ReceiptPaper {
+                    Text(trip.isWalkingTest ? "WALKING TEST / GPS ONLY" : trip.hasEstimate ? "LOCAL / SIMULATED ESTIMATE" : "LOCAL / UNPRICED RECORDING").font(DS.technical)
+                    if trip.hasEstimate { FinancialNumber(value: trip.avoidableCost.dollars, ink: DS.background) }
+                    else { Text(trip.isWalkingTest ? "No fuel estimate" : "Estimate pending").font(.largeTitle.weight(.bold)).fontWidth(.condensed) }
+                    Text(trip.isWalkingTest ? "Walking Test · excluded from driving and league rankings" : "Modeled avoidable fuel cost").font(.headline)
+                    Text(trip.hasEstimate ? "Illustrative sample data. No actual savings were measured." : trip.isWalkingTest ? "GPS inputs and elapsed time only. No driving events or fuel costs." : "No monetary savings are claimed. An eligible API receipt is needed for model pricing.").font(.subheadline)
+                    Text("LOCAL REF / \((trip.clientTripID ?? trip.id).uuidString)").font(.caption2.monospaced()).textSelection(.enabled)
                 }
             }
+            Surface {
+                Eyebrow(text: "Local recording summary")
+                ReceiptLedgerLine(label: "Distance", value: trip.distanceLabel)
+                ReceiptLedgerLine(label: "Duration", value: trip.durationLabel)
+                if !trip.isWalkingTest { ReceiptLedgerLine(label: "Candidate events", value: trip.eventCountLabel) }
+            }
+            TripTimeline(trip: trip)
             if trip.hasEstimate {
                 Surface {
                     Eyebrow(text: "Fuel estimate")
@@ -64,7 +70,7 @@ struct TripReceiptView: View {
                 }
             }
             Surface {
-                Label("Behind the numbers", systemImage: "info.circle").font(.headline)
+                Eyebrow(text: "Behind the numbers")
                 if trip.isWalkingTest {
                     Text("Walking Test records real GPS inputs and elapsed time only. Fuel costs, driving-event detection, and league rankings are not applicable. GPS accuracy varies; this is not a validated fitness tracker.").font(.subheadline).foregroundStyle(DS.secondary)
                 } else if trip.hasEstimate {
@@ -87,6 +93,6 @@ struct TripReceiptView: View {
     }
     private func eventValue(_ count: Int) -> String { trip.recording?.motionAvailable == false ? "Unavailable" : "\(count)" }
     private func receiptLine(_ label: String, value: String, emphasized: Bool = false) -> some View {
-        HStack { Text(label).foregroundStyle(emphasized ? .white : DS.secondary); Spacer(); Text(value).fontWeight(.semibold).foregroundStyle(emphasized ? DS.mint : .white) }.font(.subheadline)
+        ReceiptLedgerLine(label: label, value: value, emphasized: emphasized)
     }
 }

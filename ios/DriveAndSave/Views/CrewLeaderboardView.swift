@@ -4,60 +4,122 @@ struct CrewLeaderboardView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Screen {
-            Label(backend.isRemote ? "Online multiplayer · \(backend.identity?.nickname ?? "Driver")" : "Offline demo · no multiplayer", systemImage: backend.isRemote ? "network" : "iphone").font(.caption).foregroundStyle(DS.mint)
-            Eyebrow(text: "Your private league")
-            Text("Less waste.\nMore bragging rights.").font(.system(size: 34, weight: .bold, design: .rounded))
-            Text("Compete individually with drivers in your league. A league needs 4+ members for ranked standings.").foregroundStyle(DS.secondary)
-            HStack {
-                NavigationLink("Create League") { LeagueFormView(creating: true) }
-                NavigationLink("Join League") { LeagueFormView(creating: false) }
-            }.buttonStyle(.borderedProminent)
-            NavigationLink("API & Vehicle setup") { APISettingsView() }
+            Eyebrow(text: backend.isRemote ? "ONLINE / PRIVATE CHAMPIONSHIP" : "OFFLINE DEMO / NO MULTIPLAYER")
+            DisplayType("THE GRID.", size: 60).accessibilityAddTraits(.isHeader).accessibilityIdentifier("leagueHeadline")
+            Text("Individual drivers. One league.\nLess waste earns the advantage.").font(.title3).foregroundStyle(DS.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { leagueActions }
+                VStack(spacing: 12) { leagueActions }
+            }
             if let league = backend.league {
                 Surface {
-                    Text(league.name).font(.title2.bold())
+                    Eyebrow(text: "Your private league")
+                    Text(league.name).font(DS.section)
                     if league.is_demo { DemoNotice() }
-                    Text("\(league.member_count) members · \(league.canRank ? "Ranked league" : "Unranked — needs 4+ members")").foregroundStyle(DS.mint)
-                    Text("League ID: \(league.crew_id.uuidString)").font(.caption).textSelection(.enabled)
+                    HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        DisplayType(String(format: "%02d", league.member_count), size: 56)
+                        Text("MEMBERS").font(DS.technical).foregroundStyle(DS.secondary)
+                    }
+                    Text("\(league.member_count) members · \(league.canRank ? "Ranked league" : "Unranked — needs 4+ members")").font(.subheadline).foregroundStyle(DS.secondary)
+                    QualificationMarks(memberCount: league.member_count)
+                    Text(league.canRank ? "Individual baselines determine who can be ranked." : "Four members activate ranked play. Individual driving baselines are still required.").font(.caption).foregroundStyle(DS.secondary)
+                    Text("League ID: \(league.crew_id.uuidString)").font(.caption.monospaced()).textSelection(.enabled)
                     LeagueInviteActions(league: league)
                     Button("Refresh league & drivers") { Task { await backend.refreshLeague() } }.disabled(backend.isBusy)
                 }
                 if league.canRank {
-                    Text("Individual driver rankings").font(.title2.bold())
-                    if backend.standings.isEmpty { Text("No ranked driving data yet. Baselines need the first 3 eligible trips.").foregroundStyle(DS.secondary) }
-                    ForEach(backend.standings) { standing in
-                        Surface {
-                            HStack { Text(standing.rank.map { "#\($0)" } ?? "Unranked").font(.title2.bold()); Text(standing.nickname).font(.headline); Spacer(); Text(standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? "Awaiting baseline").foregroundStyle(DS.mint) }
-                            if backend.leaderboardIsDemo { DemoNotice() }
-                            Text("\(standing.est_savings_usd.dollars) server estimate · current pricing may be placeholder").font(.caption).foregroundStyle(DS.secondary)
+                    Eyebrow(text: "Individual driver rankings")
+                    if backend.leaderboardIsDemo { DemoNotice() }
+                    if backend.standings.isEmpty {
+                        Text("No ranked driving data yet. Baselines need the first 3 eligible trips.").foregroundStyle(DS.secondary)
+                        ForEach(league.members) { member in
+                            ChampionshipRow(rank: nil, name: member.nickname, result: "Awaiting baseline", detail: "No driver rank returned yet", isCurrent: member.user_id == backend.identity?.userID)
                         }
                     }
+                    ForEach(backend.standings) { standing in
+                        ChampionshipRow(rank: standing.rank, name: standing.nickname,
+                            result: standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? "Awaiting baseline",
+                            detail: "\(standing.trips_counted) trips counted · \(standing.est_savings_usd.dollars) server estimate. Pricing may be placeholder.",
+                            isCurrent: standing.user_id == backend.identity?.userID)
+                    }
                 } else {
-                    Surface {
-                        Eyebrow(text: "Members · not ranked")
-                        ForEach(league.members) { member in Text(member.nickname).font(.headline) }
+                    Eyebrow(text: "Members · not ranked")
+                    ForEach(league.members) { member in
+                        ChampionshipRow(rank: nil, name: member.nickname, result: "Not ranked", detail: "League needs 4+ members", isCurrent: member.user_id == backend.identity?.userID)
                     }
                 }
             } else if !backend.isRemote {
                 Surface {
                     DemoNotice()
-                    Text("Example individual standings").font(.headline)
+                    Text("Example individual standings").font(DS.section)
                     Text("Fictional 4-driver league · no server or competition data").font(.caption).foregroundStyle(DS.secondary)
-                    ForEach(Array([("Alex", 24), ("Sam", 21), ("Jordan", 17), ("Taylor", 12)].enumerated()), id: \.offset) { index, driver in
-                        HStack { Text("#\(index + 1)"); Text(driver.0); Spacer(); Text("\(driver.1)% improvement").foregroundStyle(DS.mint) }.font(.subheadline)
-                    }
+                }
+                ForEach(Array([("Alex", 24), ("Sam", 21), ("Jordan", 17), ("Taylor", 12)].enumerated()), id: \.offset) { index, driver in
+                    ChampionshipRow(rank: index + 1, name: driver.0, result: "\(driver.1)% improvement", detail: "Fictional driver · demonstration only", isCurrent: false)
                 }
             } else {
-                Text("Create or join a private league to view individual driver standings.").foregroundStyle(DS.secondary)
+                Surface {
+                    Text("Your league starts here.").font(DS.section)
+                    Text("Create a private league or paste an invitation from a friend. A league needs 4+ members for ranked standings.").foregroundStyle(DS.secondary)
+                    QualificationMarks(memberCount: 0)
+                }
             }
             Surface {
                 Text("Walking Tests, demo replays, and synthetic trips are excluded from real competition. Each driver competes against other members of their private league.").font(.caption).foregroundStyle(DS.secondary)
             }
+            NavigationLink("API & Vehicle setup") { APISettingsView() }.font(.subheadline)
             BackendStatusView()
         }.navigationTitle("Leagues").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink { ProfileView() } label: { Label("Profile", systemImage: "person.crop.circle") } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink { ProfileView() } label: { Text("PROFILE").font(DS.technical) } } }
             .refreshable { await backend.refreshLeague() }
             .task { if backend.identity != nil { await backend.refreshLeague() } }
+    }
+    private var leagueActions: some View {
+        Group {
+            NavigationLink("Create League") { LeagueFormView(creating: true) }
+                .buttonStyle(IgnitionButtonStyle())
+            NavigationLink("Join League") { LeagueFormView(creating: false) }
+                .font(.headline).frame(maxWidth: .infinity, minHeight: 64)
+                .foregroundStyle(DS.ink).overlay(Rectangle().stroke(DS.rule, lineWidth: 1))
+        }
+    }
+}
+
+struct ChampionshipRow: View {
+    let rank: Int?
+    let name: String
+    let result: String
+    let detail: String
+    let isCurrent: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 16) { rankNumber; driver; Spacer(minLength: 8); Text(result).font(.subheadline.monospaced()).foregroundStyle(DS.ink) }
+                VStack(alignment: .leading, spacing: 10) { HStack(alignment: .firstTextBaseline, spacing: 16) { rankNumber; driver }; Text(result).font(.subheadline.monospaced()) }
+            }
+            Text(detail).font(.caption).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true)
+        }.padding(.vertical, 16).padding(.leading, isCurrent ? 12 : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) { if isCurrent { Rectangle().fill(DS.acid).frame(width: 3).padding(.vertical, 16) } }
+            .overlay(alignment: .bottom) { MeasurementRule() }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(isCurrent ? "currentDriverStanding" : "standing-\(name)")
+    }
+    private var rankNumber: some View { DisplayType(rank.map { String(format: "%02d", $0) } ?? "—", size: 42) }
+    private var driver: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(name).font(.headline).foregroundStyle(DS.ink)
+            if isCurrent { Text("YOU").font(DS.technical).foregroundStyle(DS.acid) }
+        }
+    }
+}
+
+struct QualificationMarks: View {
+    let memberCount: Int
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<4) { index in Rectangle().fill(index < memberCount ? DS.acid : DS.rule).frame(height: 4) }
+        }.accessibilityLabel("\(min(memberCount, 4)) of 4 membership requirements met")
     }
 }
 
@@ -86,7 +148,7 @@ struct LeagueFormView: View {
                     Text("Enter both values from the shared invite. The API cannot look up a league using only its code. Joining moves you out of your previous league.").font(.caption).foregroundStyle(DS.secondary)
                     Button("Join League") { Task { await backend.joinLeague(id: leagueID, code: inviteCode) } }.accessibilityIdentifier("joinLeague")
                 }
-            }.buttonStyle(.borderedProminent).disabled(backend.isBusy)
+            }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             if let league = backend.league { Text("Current league: \(league.name)").font(.headline).foregroundStyle(DS.mint) }
             NavigationLink("Your profile") { ProfileView() }
             BackendStatusView()

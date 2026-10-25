@@ -19,6 +19,7 @@ struct WelcomeView: View {
                     TextField("Nickname", text: $nickname).textContentType(.nickname)
                         .autocorrectionDisabled().submitLabel(.done).focused($editingNickname)
                         .accessibilityIdentifier("welcomeNickname")
+                        .onSubmit { editingNickname = false }
                     Text("1–32 characters. Your league members will see this name.").font(.caption).foregroundStyle(DS.secondary)
                     Toggle("Offline demo", isOn: $offline).accessibilityIdentifier("offlineOnboarding")
                     Text(offline ? "Only this iPhone. No server requests or multiplayer. Demo data stays separate from your remote account." : "Online multiplayer · \(URL(string: backend.connectionURL)?.host ?? "your selected server"). Each iPhone gets its own secure account.")
@@ -39,7 +40,7 @@ struct WelcomeView: View {
                             if backend.identity == nil { await backend.register(nickname: nickname, demoAccount: allowRecovery) }
                         }
                     }
-                    .buttonStyle(.borderedProminent).accessibilityIdentifier("welcomeRegister")
+                    .buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("welcomeRegister")
                     .disabled(nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nickname.trimmingCharacters(in: .whitespacesAndNewlines).count > 32 || backend.isBusy)
                 }
                 if backend.isBusy { ProgressView("Creating your profile…") }

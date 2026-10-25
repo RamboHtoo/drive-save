@@ -1,29 +1,66 @@
 import SwiftUI
 
 enum DS {
-    static let background = Color(red: 0.035, green: 0.065, blue: 0.12)
-    static let card = Color(red: 0.07, green: 0.115, blue: 0.18)
-    static let mint = Color(red: 0.43, green: 0.94, blue: 0.76)
-    static let secondary = Color(red: 0.64, green: 0.71, blue: 0.80)
+    static let background = Color(hex: 0x0A0A0A)
+    static let card = Color(hex: 0x141512)
+    static let acid = Color(hex: 0xD4FB08)
+    static let ink = Color(hex: 0xF1F0E8)
+    static let signal = Color(hex: 0x777A73)
+    // A brighter companion for small body copy; signal gray is reserved for graphic marks.
+    static let secondary = Color(hex: 0xADAFA6)
+    static let rule = Color(hex: 0x35372F)
+    static let mint = acid // Compatibility for existing recording/settings views.
+    static let technical = Font.system(.caption, design: .monospaced).weight(.medium)
+    static let section = Font.system(.title2, design: .default).weight(.bold)
 }
 
-extension Double {
-    var dollars: String { formatted(.currency(code: "USD")) }
+private extension Color {
+    init(hex: UInt32) { self.init(.sRGB, red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1) }
+}
+
+extension Double { var dollars: String { formatted(.currency(code: "USD")) } }
+
+struct DisplayType: View {
+    let text: String
+    @ScaledMetric(relativeTo: .largeTitle) private var size: CGFloat = 48
+    init(_ text: String, size: CGFloat = 48) { self.text = text; _size = ScaledMetric(wrappedValue: size, relativeTo: .largeTitle) }
+    var body: some View {
+        Text(text).font(.system(size: size, weight: .black)).fontWidth(.condensed)
+            .tracking(-size * 0.035).fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(DS.ink)
+    }
+}
+
+struct FinancialNumber: View {
+    let value: String
+    var ink: Color = DS.ink
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var size = 76.0
+    var body: some View {
+        Text(value).font(.system(size: size, weight: .semibold)).fontWidth(.condensed)
+            .tracking(-size * 0.055).monospacedDigit().foregroundStyle(ink)
+            .lineLimit(1).minimumScaleFactor(0.4)
+            .contentTransition(.numericText())
+            .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.9), value: value)
+    }
+}
+
+struct MeasurementRule: View {
+    var body: some View { Rectangle().fill(DS.rule).frame(height: 1).accessibilityHidden(true) }
 }
 
 struct Surface<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 16) { content }
-            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(DS.card, in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.05)))
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
+            .overlay(alignment: .top) { MeasurementRule() }
     }
 }
 
 struct Eyebrow: View {
     let text: String
-    var body: some View { Text(text.uppercased()).font(.caption.weight(.bold)).tracking(2).foregroundStyle(DS.secondary) }
+    var body: some View { Text(text.uppercased()).font(DS.technical).tracking(1.5).foregroundStyle(DS.secondary).fixedSize(horizontal: false, vertical: true) }
 }
 
 struct Metric: View {
@@ -31,7 +68,7 @@ struct Metric: View {
     let label: String
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(value).font(.title2.bold()).foregroundStyle(.white)
+            Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(DS.ink)
             Text(label).font(.caption).foregroundStyle(DS.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -39,31 +76,43 @@ struct Metric: View {
 
 struct DemoNotice: View {
     var body: some View {
-        Label("DEMO · SIMULATED DATA", systemImage: "sparkles")
-            .font(.caption2.bold()).tracking(1).foregroundStyle(DS.mint)
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(DS.mint.opacity(0.10), in: Capsule())
+        Text("DEMO · SIMULATED DATA").font(DS.technical).foregroundStyle(DS.secondary)
+            .padding(.leading, 10).overlay(alignment: .leading) { Rectangle().fill(DS.signal).frame(width: 2) }
+    }
+}
+
+struct IgnitionButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.headline).foregroundStyle(DS.background)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.horizontal, 18).padding(.vertical, 8)
+            .background(isEnabled ? DS.acid : DS.signal)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .offset(y: configuration.isPressed && !reduceMotion ? 1 : 0)
+            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.8), value: configuration.isPressed)
     }
 }
 
 struct TripRow: View {
     let trip: Trip
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: trip.isWalkingTest ? "figure.walk" : "car.side.fill").font(.title3).foregroundStyle(DS.mint)
-                .frame(width: 46, height: 46).background(DS.mint.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(trip.displayTitle).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                Text(trip.provenanceLabel).font(.system(size: 9, weight: .bold)).foregroundStyle(trip.source == .measured ? DS.mint : DS.secondary)
-                Text("\(trip.distanceLabel) · \(trip.durationLabel)").font(.caption).foregroundStyle(DS.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) { title; Spacer(minLength: 12); amount }
+                VStack(alignment: .leading, spacing: 8) { title; amount }
             }
-            Spacer(minLength: 2)
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(trip.isWalkingTest ? "GPS test" : trip.hasEstimate ? trip.avoidableCost.dollars : "Pending").font(.subheadline.bold()).foregroundStyle(DS.mint)
-                Text(trip.isWalkingTest ? "no fuel costs" : trip.hasEstimate ? "avoidable" : "estimate").font(.caption2).foregroundStyle(DS.secondary)
-            }
-            Image(systemName: "chevron.right").font(.caption2.bold()).foregroundStyle(DS.secondary)
-        }.padding(.vertical, 8).contentShape(Rectangle()).accessibilityElement(children: .combine)
+            Text(trip.provenanceLabel).font(.caption.monospaced()).foregroundStyle(DS.secondary)
+            Text("\(trip.distanceLabel) · \(trip.durationLabel)").font(.caption.monospaced()).foregroundStyle(DS.secondary)
+        }.padding(.vertical, 16).frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { MeasurementRule() }
+            .contentShape(Rectangle()).accessibilityElement(children: .combine)
+    }
+    private var title: some View { Text(trip.displayTitle).font(.headline).foregroundStyle(DS.ink) }
+    private var amount: some View {
+        Text(trip.isWalkingTest ? "GPS test" : trip.hasEstimate ? trip.avoidableCost.dollars : "Pending")
+            .font(.body.monospaced().weight(.semibold)).foregroundStyle(DS.ink)
     }
 }
 
@@ -71,13 +120,12 @@ struct Screen<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) { content }
-                .padding(20)
+            VStack(alignment: .leading, spacing: 24) { content }.padding(20)
         }
-            // TabView supplies the native tab bar safe area. Keep the extra breathing room
-            // inside the scrolling content, so the last message can scroll above the bar
-            // without shrinking or clipping the viewport with a second tab bar reservation.
-            .contentMargins(.bottom, 24, for: .scrollContent)
-            .background(DS.background).toolbarBackground(DS.background, for: .navigationBar)
+        .contentMargins(.bottom, 24, for: .scrollContent)
+        .foregroundStyle(DS.ink).background(DS.background)
+        .buttonBorderShape(.roundedRectangle(radius: 4))
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(DS.background, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
     }
 }

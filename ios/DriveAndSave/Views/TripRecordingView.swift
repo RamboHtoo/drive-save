@@ -10,16 +10,17 @@ struct TripRecordingView: View {
     @State private var mountingConfirmed = false
     @State private var began = false
     @State private var receipt: Trip?
+    @State private var savedTrip: Trip?
     @State private var pendingTrip: Trip?
     @State private var saveError: String?
     @State private var showDebug = false
     var body: some View {
         Screen {
-            if let receipt {
+            if let savedTrip {
                 Label("Trip saved on this iPhone", systemImage: "checkmark.circle.fill").foregroundStyle(DS.mint)
-                NavigationLink { TripReceiptView(trip: receipt) } label: {
+                NavigationLink { TripReceiptView(trip: savedTrip) } label: {
                     Label("Open trip receipt", systemImage: "receipt").font(.headline).frame(maxWidth: .infinity).padding()
-                }.buttonStyle(.borderedProminent).accessibilityIdentifier("openReceipt")
+                }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("openReceipt")
                 Text("You can also find it in History.").foregroundStyle(DS.secondary)
             } else if began {
                 recordingContent
@@ -27,9 +28,9 @@ struct TripRecordingView: View {
                 setupContent
             }
         }
-        .navigationTitle(walkingMode ? "Walking Test" : receipt != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
+        .navigationTitle(walkingMode ? "Walking Test" : savedTrip != nil ? "Trip saved" : began ? "Trip recording" : "Before you drive")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(began && receipt == nil)
+        .navigationBarBackButtonHidden(began && savedTrip == nil)
         .onAppear { if !began { recorder.prepare(mode: selectedMode) } }
         .onDisappear {
             if recorder.isRecording { recorder.endForInterruption(reason: "Recording screen was left. Recording ended; return to save the partial trip.") }
@@ -37,7 +38,7 @@ struct TripRecordingView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                if began && receipt == nil { recorder.endForInterruption() }
+                if began && savedTrip == nil { recorder.endForInterruption() }
                 else { recorder.prepare(mode: selectedMode) }
             }
         }
@@ -65,7 +66,7 @@ struct TripRecordingView: View {
                 Label(walkingMode ? "Core Location · Walking Test" : "Only interact while parked", systemImage: walkingMode ? "figure.walk" : "checkmark.shield.fill").font(.headline).foregroundStyle(DS.mint)
                 Text(walkingMode ? "Walk outdoors with your iPhone in any comfortable position. Only GPS distance and elapsed time are recorded. Phone angle can change; no calibration is needed." : "Secure the phone in a flat mount, screen facing up and top edge pointing toward the front of the car. Start before driving. Stop only after parking.")
                 Text(walkingMode ? "Driving-event detection and fuel estimates are off. Walking Tests do not contribute to driving history totals or league rankings. Stop walking before reviewing the screen." : "Foreground recording only. Leaving the app or locking your phone ends recording; return to save the partial trip. Keep Drive Save open. No driving alerts are sent.").font(.subheadline).foregroundStyle(DS.secondary)
-                if walkingMode { Text("Keep this screen open. Locking the phone, switching tabs or leaving the app ends capture; return to save.").font(.caption).foregroundStyle(DS.secondary) }
+                if walkingMode { Text("Keep this screen open. Locking the phone or leaving the app ends capture; return to save.").font(.caption).foregroundStyle(DS.secondary) }
             }
             Surface {
                 if simulatorMode { Text("Generates a synthetic route and events. Saved trips are marked SIMULATED.").font(.caption).foregroundStyle(DS.mint) }
@@ -95,7 +96,7 @@ struct TripRecordingView: View {
             } label: {
                 Label(walkingMode ? "Start Walking Test" : simulatorMode ? "Start simulated trip" : "Start recording", systemImage: "record.circle")
                     .font(.headline).frame(maxWidth: .infinity).padding(12)
-            }.buttonStyle(.borderedProminent).disabled((!walkingMode && !mountingConfirmed) || !recorder.canStart).accessibilityIdentifier("beginRecording")
+            }.buttonStyle(IgnitionButtonStyle()).disabled((!walkingMode && !mountingConfirmed) || !recorder.canStart).accessibilityIdentifier("beginRecording")
         }
     }
 
@@ -119,7 +120,7 @@ struct TripRecordingView: View {
             Text(walkingMode ? "Stop walking before reviewing or saving your Walking Test." : "Keep your attention on the road. Review details only after parking.").font(.headline).foregroundStyle(DS.secondary)
             if let interruption = recorder.interruption { Text(interruption).font(.subheadline).foregroundStyle(.orange) }
             Button(walkingMode ? "Stop & save Walking Test" : "Stop & save · I’m parked") { finish() }
-                .font(.headline).buttonStyle(.borderedProminent).accessibilityIdentifier("stopTrip")
+                .font(.headline).buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("stopTrip")
             if !walkingMode {
             DisclosureGroup("Parked developer tools") {
                 Button("View live sensor measurements") { showDebug = true }.padding(.vertical)
@@ -140,7 +141,7 @@ struct TripRecordingView: View {
     private func finish() {
         if pendingTrip == nil { pendingTrip = recorder.finish() }
         guard let trip = pendingTrip else { return }
-        do { try model.save(trip); receipt = trip }
+        do { try model.save(trip); savedTrip = trip; receipt = trip }
         catch { saveError = "The trip remains in memory. Retry before leaving this screen. \(error.localizedDescription)" }
     }
 }

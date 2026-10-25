@@ -36,7 +36,7 @@ struct TripHistoryView: View {
                             Text(trip.date.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(DS.secondary)
                             TripRow(trip: trip)
                         }
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).accessibilityIdentifier("historyTrip-\(trip.title)")
                     if trip.id != visibleTrips.last?.id { Divider() }
                 }
             }
