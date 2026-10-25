@@ -39,3 +39,9 @@ preservation. It uses an ordinary live view in place of Timescale's continuous
 aggregate; Timescale policy behavior requires cloud verification.
 Files in `tests/fixtures/v1/` are historical migration-test snapshots, not deployment
 scripts. Use the current files under `analytics/` for deployments.
+
+## HackPSU final integration
+
+The release combines the native app in `ios/`, API in `backend/`, shared vehicle model in `drive_save_model/`, and Tiger/Timescale schema in `analytics/`. See [release report](docs/release-hackpsu-final.md) for exact revisions, verification, and deployment prerequisites.
+
+Current iOS standings use `GET /leaderboard/costs`: current UTC-week estimated avoidable fuel cost ascending, dense ties, missing data unranked. `GET /leaderboard` is deprecated compatibility for older improvement-based clients. The explicit synthetic showcase is separate and local-only until reviewed deployment; no seed runs automatically.

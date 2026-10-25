@@ -13,7 +13,7 @@ import config
 import db
 from errors import register_error_handlers
 from models.common import ErrorResponse, Health
-from routes import crews, leaderboard, trips, users, vehicles
+from routes import crews, leaderboard, trips, users, vehicles, league_costs
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.include_router(vehicles.router)
 app.include_router(trips.router)
 app.include_router(crews.router)
 app.include_router(leaderboard.router)
+app.include_router(league_costs.router)
 
 
 @app.get("/health", response_model=Health, tags=["meta"])

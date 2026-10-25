@@ -1,3 +1,5 @@
+> Release integration (2026-10-25): the implementation now lives in `backend/services/league_demo.py` and `backend/routes/league_costs.py`; `backend/main.py` registers routes once. Apply `backend/db/004_league_demo.sql` only through an approved deployment. The old Python adapter is a compatibility import. The instructions/results below describe the original local proposal; the current release report in `docs/release-hackpsu-final.md` supersedes its integration and test status. Production remains untouched.
+
 # Five fictional members in Htoo's existing league
 
 **Prepared and tested locally. Nothing has been deployed or seeded in Tiger Cloud.**
@@ -28,7 +30,7 @@ Inspected backend `5094a01bb2844cfd9819ad8b8ec55f13dc26acf5` and analytics `3545
 - Existing `seed_demo_league.py` creates a new league/accounts on each run and changes synthetic fixture speeds. It is intentionally not used.
 - Existing `POST /users` has no idempotency key or caller-supplied ID, no persistent demo-identity registry, and no account cleanup endpoint. Using it repeatedly cannot meet atomic retry/cleanup guarantees. Existing auth and membership logic are reused; a bounded transaction is necessary for idempotent demo provisioning.
 
-The reviewed proposal is `schema.sql` plus `backend_extension.py`. They are kept under `/ios/DeveloperTools` as a handoff; the backend/analytics working trees are unmodified. An explicit backend deployment is required before production seeding or remote showcase display works.
+The reviewed proposal is `backend/db/004_league_demo.sql` plus `backend/services/league_demo.py`. They are kept under `/ios/DeveloperTools` as a handoff; the backend/analytics working trees are unmodified. An explicit backend deployment is required before production seeding or remote showcase display works.
 
 ## Data isolation and preservation
 
@@ -103,9 +105,9 @@ Normal rankings request `/leaderboard/costs`; an old server may return the legac
 
 ## Isolated verification
 
-A dedicated localhost TimescaleDB/Postgres 17 container was used, with the complete fetched analytics schema/queries and backend schema additions. Image digest: `sha256:b56a3f51991df1f79d0c1a0841cad5c5fa8058fdd6a3ee6886394a6d4c174538`. No production URL/credentials are accepted by the integration test; it hard-codes `127.0.0.1:55439/drivesave_demo_isolated`. It creates a clearly isolated Htoo fixture account and pre-existing fixture league, never the real account.
+A dedicated localhost TimescaleDB/Postgres 17 container was used, with the complete fetched analytics schema/queries and backend schema additions. Image digest: `sha256:b56a3f51991df1f79d0c1a0841cad5c5fa8058fdd6a3ee6886394a6d4c174538`. No production URL/credentials are accepted by the integration test; it hard-codes `127.0.0.1:55440/postgres`. It creates a clearly isolated Htoo fixture account and pre-existing fixture league, never the real account.
 
-Run against a read-only backend snapshot, the dedicated test database with `schema.sql` applied, and temporary Python dependencies matching the backend (FastAPI/asyncpg/Pydantic/NumPy; httpx for ASGI tests):
+Run against a read-only backend snapshot, the dedicated test database with `backend/db/004_league_demo.sql` applied, and temporary Python dependencies matching the backend (FastAPI/asyncpg/Pydantic/NumPy; httpx for ASGI tests):
 
 ```sh
 python3 DeveloperTools/league_demo/test_isolated.py /path/to/backend-snapshot

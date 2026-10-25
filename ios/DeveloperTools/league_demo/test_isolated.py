@@ -4,10 +4,11 @@ import json
 import os
 from pathlib import Path
 import sys
+from datetime import datetime, timedelta, timezone
 from uuid import UUID,uuid4
 
 # Fixed local-only test database. Never accept DATABASE_URL inherited from a shell.
-os.environ['DATABASE_URL']='postgresql://postgres:isolated-demo-test@127.0.0.1:55439/drivesave_demo_isolated'
+os.environ['DATABASE_URL']='postgresql://postgres:release-local-test@127.0.0.1:55440/postgres'
 os.environ['DRIVESAVE_ENABLE_LEAGUE_DEMO_WRITE']='1'
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[1]
@@ -67,7 +68,7 @@ async def main():
             check(len({r['user_id'] for r in board['standings']})==6,'all identities have separate IDs')
             fixture_dir=ROOT/'DriveAndSave/MockData/Backend'
             fixture=(dict(board,viewer_id=str(owner)))
-            (fixture_dir/'league-showcase.json').write_text(json.dumps(fixture,indent=2)+'\n')
+            # Keep committed offline snapshots deterministic; tests never overwrite them.
             normal=(await client.get('/leaderboard/costs',headers=headers)).json()
             check(all(r['rank'] is None and r['weekly_avoidable_cost_usd'] is None for r in normal['standings']),'normal competition never includes illustrative costs')
             legacy=(await client.get('/leaderboard',headers=headers)).json()
@@ -86,6 +87,13 @@ async def main():
             # isolated test input; it is never Htoo's production history or a claimed real drive.
             payload=json.loads((ROOT/'DriveAndSave/MockData/Backend/calculation-trip.json').read_text());payload['client_trip_id']=str(uuid4())
             for event in payload['events']: event['event_id']=str(uuid4())
+            # Preserve trace spacing while keeping this controlled fixture in the current week.
+            parse = lambda value: datetime.fromisoformat(value.replace('Z', '+00:00'))
+            shift = datetime.now(timezone.utc) - timedelta(minutes=1) - parse(payload['ended_at'])
+            for key in ('started_at', 'ended_at'):
+                payload[key] = (parse(payload[key]) + shift).isoformat()
+            for sample in payload['events'] + payload['speed_samples']:
+                sample['ts'] = (parse(sample['ts']) + shift).isoformat()
             created=await client.post('/trips',headers=headers,json=payload)
             check(created.status_code==201,'existing recorded-mode model pipeline remains available in isolated test')
             receipt_response=await client.get(created.json()['receipt_url'],headers=headers)

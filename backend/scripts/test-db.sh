@@ -17,7 +17,7 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   until docker exec "$NAME" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 fi
 
-for file in analytics/schema.sql analytics/queries.sql backend/db/002_event_details.sql backend/db/003_vehicle_catalog.sql; do
+for file in analytics/schema.sql analytics/queries.sql backend/db/002_event_details.sql backend/db/003_vehicle_catalog.sql backend/db/004_league_demo.sql; do
   docker exec -i "$NAME" psql -q -U postgres -v ON_ERROR_STOP=1 < "$file" >/dev/null
 done
 # Tests truncate tables between runs, so keep the aggregate purely real-time (no background refresh).
