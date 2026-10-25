@@ -184,6 +184,57 @@ def test_everything_is_demo_data_while_the_model_is_experimental(client):
     assert client.get("/leaderboard", headers=headers).json()["is_demo"] is True
 
 
+def scored_trip(user_id, league_id, config_id, *, is_demo, miles, usd, baseline_slot=None, ago=timedelta(minutes=10)):
+    """Inserts a priced trip and its metrics row directly: the API can't make a real (non-demo) one while
+    the model is experimental. No model_result, so the schema's demo-only model checks don't apply."""
+    trip_id = query(
+        """
+        INSERT INTO trips (user_id, client_trip_id, league_id, started_at, ended_at, distance_mi, source, is_demo,
+                           status, scoring_config_id, fuel_gal, avoidable_usd, baseline_slot)
+        VALUES ($1, gen_random_uuid(), $2, now() - $3::interval, now() - $3::interval + interval '5 minutes', $4,
+                'recorded', $5, 'scored', $6, 0.1, $7, $8)
+        RETURNING id
+        """,
+        user_id, league_id, ago, miles, is_demo, config_id, usd, baseline_slot,
+    )[0]["id"]
+    query(
+        """
+        INSERT INTO trip_metrics (ts, trip_id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, is_baseline, is_demo)
+        SELECT started_at, id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, baseline_slot IS NOT NULL, is_demo
+        FROM trips WHERE id = $1
+        """,
+        trip_id,
+    )
+
+
+def test_demo_trips_never_count_in_a_real_leagues_standings(client):
+    """Once real leagues exist, demo trips recorded inside one must not move its standings."""
+    rae_id, rae = new_user(client, "rae")
+    max_id, _ = new_user(client, "max")
+    league_id = query("INSERT INTO leagues (name, join_code, is_demo) VALUES ('Real League', 'REAL01', false) RETURNING id")[0]["id"]
+    for user_id in (rae_id, max_id):
+        query("INSERT INTO league_members (user_id, league_id) VALUES ($1, $2)", uuid.UUID(user_id), league_id)
+    config_id = query("INSERT INTO scoring_configs (model_version, vehicle_profile, fuel_price_usd_per_gal) VALUES ('test', '{}', 3.5) RETURNING id")[0]["id"]
+
+    rae_uuid, max_uuid = uuid.UUID(rae_id), uuid.UUID(max_id)
+    for slot in (1, 2, 3):
+        scored_trip(rae_uuid, league_id, config_id, is_demo=False, miles=1, usd=0.10, baseline_slot=slot, ago=timedelta(days=slot))
+        # Demo baselines and a perfect demo week for Max, in the same real league.
+        scored_trip(max_uuid, league_id, config_id, is_demo=True, miles=1, usd=0.50, baseline_slot=slot, ago=timedelta(days=slot))
+    scored_trip(rae_uuid, league_id, config_id, is_demo=False, miles=10, usd=0.80)  # $0.08/mi against $0.10: 20% better
+    scored_trip(rae_uuid, league_id, config_id, is_demo=True, miles=10, usd=0.0)  # would make Rae 100% better if it counted
+    scored_trip(max_uuid, league_id, config_id, is_demo=True, miles=10, usd=0.0)
+
+    board = client.get("/leaderboard", headers=rae).json()
+    assert board["is_demo"] is False
+    assert [(s["nickname"], s["rank"], s["improvement_pct"], s["est_savings_usd"], s["trips_counted"], s["state"]) for s in board["standings"]] == [
+        ("rae", 1, 20.0, 0.2, 1, "ready"),
+        ("max", None, None, 0.0, 0, "collecting_baseline"),  # only demo trips: no real baseline
+    ]
+    # And the demo standings can't see a real league at all.
+    assert query("SELECT count(*) AS n FROM drive_save_leaderboard($1, now(), true)", league_id)[0]["n"] == 0
+
+
 def test_retried_upload_returns_same_trip(client):
     _, headers = new_user(client)
     first = upload(client, headers).json()
