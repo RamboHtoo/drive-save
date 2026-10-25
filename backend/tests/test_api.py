@@ -412,6 +412,23 @@ def test_model_names_with_slashes_work_as_query_parameters(client, vehicle_list)
 
 
 @pytest.mark.parametrize(
+    "query, model",
+    [
+        ("make=Lexus&model=RX%20450h%2B%20AWD", "RX 450h+ AWD"),  # everything percent-encoded
+        ("make=Lexus&model=RX%20450h+%20AWD", "RX 450h+ AWD"),  # iOS URLComponents: spaces %20, plus left as it is
+        ("make=Lexus&model=RX+450h%2B+AWD", "RX 450h+ AWD"),  # form encoding: spaces +, plus %2B
+        ("make=Lexus&model=RX+450h+AWD", "RX 450h AWD"),  # form encoding of the plus-less model next to it
+        ("make=Saab&model=FCH69+F46", "FCH69+F46"),  # iOS, no spaces to tell: the space reading finds nothing
+    ],
+)
+def test_a_plus_sign_in_a_model_name_finds_that_car(client, vehicle_list, query, model):
+    years = client.get(f"/vehicles/years?{query}")
+    assert years.status_code == 200 and years.json()["model"] == model
+    car = client.get(f"/vehicles/details?{query}&year={years.json()['years'][0]}")
+    assert car.status_code == 200 and car.json()["model"] == model
+
+
+@pytest.mark.parametrize(
     "path, params",
     [
         ("/vehicles/models", {"make": "Nope"}),

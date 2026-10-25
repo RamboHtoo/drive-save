@@ -27,6 +27,14 @@ Lookups ignore case and extra spaces. Model names stay as EPA lists them, so one
 
 Left out of the picker, but kept in `epa_test_cars`: EPA's own test car, Cruise's driverless test fleet, and police and emergency vehicles.
 
+## Errors in EPA's data
+
+`epa_test_cars` keeps every value as EPA published it. The parameters leave out values that can't be right:
+
+- Lab MPG outside 5 to 250. EPA writes `9999.9999999` (also `999`, `1000`) where a result is missing, and averaged in, it doubled some cars' highway MPG. 63 FTP, highway and US06 results are left out this way.
+- FTP bags that disagree with the FTP composite. The hot-start city result from bags 2 and 3 is 0.92 to 1.13 times the composite for 99.9% of cars. Outside 0.8 to 1.3, the composite is used instead (the 2021 GMC Canyon 4WD's bags say 2.5 times).
+- N/V ratios outside 5 to 80 rpm per mph. The 2015-2017 BMW M3 says 216.5, which made it coast down at 0.27 g. These cars get the Mazda5's engine braking instead (`engine_braking_from_reference_car`).
+
 ## The typical configuration
 
 EPA usually tests several configurations of a model year: engines, transmissions, drive layouts. The app asks only for brand, model and year, so each entry uses a typical configuration. Among those the fuel model supports, gasoline comes before diesel and automatics before manuals (almost every car sold in the US is an automatic). The typical configuration is the one with the median lab fuel use. Every configuration is kept in `variants`, with its own parameters.
@@ -57,9 +65,9 @@ The aggressive US06 test doesn't set `enrichment_max`. The model already misses 
 
 - electric, hydrogen, CNG and LPG cars, and configurations tested only on E85 (`electricity_not_modeled` and similar flags)
 - configurations without a city or highway lab result, or without test weight, horsepower and road load
-- 38 configurations (14 picker entries) whose tests don't fit the model at all (`tests_do_not_fit_the_model`)
+- 17 configurations (2 picker entries) whose tests don't fit the model at all (`tests_do_not_fit_the_model`)
 
-Of the 25,813 tested configurations, 23,084 are supported; of the 12,233 picker entries, 10,977.
+Of the 25,813 tested configurations, 23,085 are supported; of the 12,233 picker entries, 10,977.
 
 Hybrids and plug-ins are supported but flagged `drives_with_engine_off`: their fitted efficiency is above 0.45 because the engine is often off, which the model's physics doesn't describe.
 

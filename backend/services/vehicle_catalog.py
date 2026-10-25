@@ -17,8 +17,11 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from services import vehicle_params
 from services.epa_dataset import model_key
 
-CATALOG_VERSION = "1"  # change it when entries or parameters are computed differently, so the loader reloads
+CATALOG_VERSION = "4"  # change it when entries or parameters are computed differently, so the loader reloads
 FTP_PROCEDURES = {2, 21, 25, 31, 35}  # FTP exhaust tests on Federal or California fuel; not cold CO (11) or 50 F (52)
+# Lab MPG outside this range is EPA's placeholder for a missing result (9999.9999999, 999, 1000) or a
+# typo (0.9); it's left out. Hybrids reach about 100 MPG in some FTP bags.
+LAB_MPG_RANGE = (5, 250)
 FUELS = ("gasoline", "diesel", "e85", "electricity", "hydrogen", "cng", "lpg", "other")  # which tests describe a configuration, best first
 _SPECS = (
     "vehicle_type", "displacement_l", "cylinders", "rated_hp", "transmission", "transmission_code", "gears", "drive",
@@ -153,7 +156,7 @@ def _configuration(rows: list[dict]) -> dict:
     fuel = next((family for family in FUELS if families[family]), "other")
     tests = [row for row in rows if fuel_family(row["fuel"]) == fuel]
     ftp = [row for row in tests if row["test_category"] == "FTP" and row["test_procedure_code"] in FTP_PROCEDURES]
-    bags = [row for row in ftp if row["fe_bag_2"] and row["fe_bag_3"]]
+    bags = [row for row in ftp if _is_lab_mpg(row["fe_bag_2"]) and _is_lab_mpg(row["fe_bag_3"])]
     specs = {name: _most_common(row[name] for row in rows) for name in _SPECS}
     car = vehicle_params.CarTests(
         fuel=fuel,
@@ -222,7 +225,11 @@ def _most_common(values):
     return counts.most_common(1)[0][0] if counts else None
 
 
+def _is_lab_mpg(value) -> bool:
+    return value is not None and LAB_MPG_RANGE[0] <= value <= LAB_MPG_RANGE[1]
+
+
 def _harmonic_mean(values) -> float | None:
-    """Average fuel economy over several tests: average the fuel per mile, not the MPG."""
-    mpg = [value for value in values if value and value > 0]
+    """Average fuel economy over several tests: average the fuel per mile, not the MPG. Placeholders don't count."""
+    mpg = [value for value in values if _is_lab_mpg(value)]
     return len(mpg) / sum(1 / value for value in mpg) if mpg else None

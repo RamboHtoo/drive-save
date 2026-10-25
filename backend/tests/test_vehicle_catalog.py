@@ -120,7 +120,7 @@ def test_efficiency_fit_finds_a_cars_efficiency_from_its_lab_results():
         cycle = vehicle_params._CYCLES[name]
         seconds, wheel_joules = vehicle_params._work(cycle, mass, road, 0.9 * 745.7 * car.rated_hp)
         mpg[name] = cycle.miles.sum() / (0.25 / 3600 * seconds + wheel_joules / (0.34 * physics.JOULES_PER_GALLON))
-    fitted = vehicle_params.compute(mazda5(ftp_bag2_mpg=mpg["udds"], ftp_bag3_mpg=mpg["udds"], hwy_mpg=mpg["hwfet"]))
+    fitted = vehicle_params.compute(mazda5(ftp_mpg=mpg["udds"], ftp_bag2_mpg=mpg["udds"], ftp_bag3_mpg=mpg["udds"], hwy_mpg=mpg["hwfet"]))
     assert fitted.values["marginal_wheel_efficiency"] == pytest.approx(0.34, abs=1e-6)
     assert fitted.fit_error["city"] == pytest.approx(0, abs=1e-9) and fitted.fit_error["highway"] == pytest.approx(0, abs=1e-9)
 
@@ -133,8 +133,19 @@ def test_cars_the_model_cant_describe_get_no_parameters():
 
 
 def test_hybrids_are_flagged():
-    hybrid = vehicle_params.compute(mazda5(ftp_bag2_mpg=55, ftp_bag3_mpg=55, hwy_mpg=55))
+    hybrid = vehicle_params.compute(mazda5(ftp_mpg=55, ftp_bag2_mpg=55, ftp_bag3_mpg=55, hwy_mpg=55))
     assert hybrid.supported and "drives_with_engine_off" in hybrid.flags
+
+
+def test_mistyped_ftp_bags_fall_back_to_the_ftp_composite():
+    typo = vehicle_params.compute(mazda5(ftp_bag2_mpg=66, ftp_bag3_mpg=74))  # 2.5x the FTP result, like the 2021 GMC Canyon 4WD
+    assert typo.lab_mpg["hot_udds"] == 26.4 and typo.flags == ["city_test_includes_cold_start"]
+
+
+def test_an_impossible_nv_ratio_falls_back_to_the_reference_engine_braking():
+    typo = vehicle_params.compute(mazda5(nv_ratio=216.5))  # as EPA lists the 2015-2017 BMW M3
+    assert typo.values["coast_deceleration"] == pytest.approx(physics.COAST_DECEL / physics.G, abs=1e-6)
+    assert typo.flags == ["engine_braking_from_reference_car"]
 
 
 def test_heavier_draggier_cars_coast_down_faster_and_bigger_engines_idle_more():
@@ -158,6 +169,13 @@ def catalog_rows(test_vehicle_id, configuration, transmission_code, hwy_mpg, **s
         {**base, "test_category": "FTP", "test_procedure_code": 21, "fe": hwy_mpg - 13},
         {**base, "test_category": "HWY", "test_procedure_code": 3, "fe": hwy_mpg},
     ]
+
+
+def test_epa_placeholders_for_missing_results_are_left_out():
+    rows = catalog_rows("AUTO", 0, "A", 40)
+    rows.append({**rows[1], "fe": 9999.9999999})  # a second highway test with no result
+    (entry,) = vehicle_catalog.build(rows)
+    assert entry["lab_hwy_mpg"] == 40
 
 
 def test_each_model_year_shows_its_typical_automatic_and_keeps_every_configuration():

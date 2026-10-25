@@ -40,11 +40,17 @@ DIESEL_JOULES_PER_GALLON = 128_488 * 1055.05585  # AFDC lower heating value of N
 FUEL_ENERGY = {"gasoline": physics.JOULES_PER_GALLON, "diesel": DIESEL_JOULES_PER_GALLON}
 
 UDDS_FIRST_BAG_S = 505  # FTP bags 1 (cold) and 3 (hot) cover the UDDS's first 505 s, bag 2 the rest
+# The bags' hot-start UDDS is 0.92-1.13x the FTP composite for 99.9% of cars. Further off, a bag
+# is mistyped (2021 GMC Canyon 4WD: 2.5x) and the composite is used instead.
+BAGS_TO_FTP_RANGE = (0.8, 1.3)
 COAST_REFERENCE_MPH = 30
 ENRICHMENT_START = 0.5  # the model's values: physics.acceleration_scenario and diagnostic_cycle_fuel
 ENRICHMENT_MAX = 0.15
 DRIVETRAIN = {"F": 0.90, "R": 0.88, "A": 0.85, "4": 0.85, "P": 0.85}  # front-wheel drive keeps the model's 0.9
 DRIVE_NAMES = {"F": "front-wheel", "R": "rear-wheel", "A": "all-wheel", "4": "four-wheel", "P": "part-time four-wheel"}
+# Engine rpm per mph in top gear. Outside this range EPA's value is a typo (the 2015-2017
+# BMW M3 says 216.5), so the car gets the Mazda5's engine-braking deceleration instead.
+NV_RATIO_RANGE = (5, 80)
 # Gasoline and diesel engines fit between 0.2 and 0.4. Higher means driving with the engine
 # off (hybrids, plug-ins), which the model's physics doesn't describe; outside the
 # supported range the tests and the model disagree too much to use.
@@ -119,7 +125,7 @@ class CarParameters:
 
 def compute(tests: CarTests) -> CarParameters:
     flags: list[str] = []
-    hot_udds = _hot_udds_mpg(tests)
+    hot_udds, from_bags = _hot_udds_mpg(tests)
     result = CarParameters(False, None, [], flags, {"ftp": tests.ftp_mpg, "hot_udds": hot_udds, "highway": tests.hwy_mpg, "us06": tests.us06_mpg})
     if tests.fuel in ("gasoline", "diesel", "e85") and tests.ftp_mpg and tests.hwy_mpg:
         result.label_mpg = label_mpg(tests.ftp_mpg, tests.hwy_mpg)
@@ -133,8 +139,8 @@ def compute(tests: CarTests) -> CarParameters:
     if not (tests.hwy_mpg and tests.hwy_mpg > 0 and hot_udds and hot_udds > 0):
         flags.append("missing_city_or_highway_test")
         return result
-    if tests.ftp_bag2_mpg is None or tests.ftp_bag3_mpg is None:
-        flags.append("city_test_includes_cold_start")  # no FTP bags: the FTP composite stands in for a hot UDDS
+    if not from_bags:
+        flags.append("city_test_includes_cold_start")  # the FTP composite stands in for a hot UDDS
 
     mass = tests.etw_lb * LB_TO_KG
     road_si = {
@@ -171,13 +177,14 @@ def compute(tests: CarTests) -> CarParameters:
     if efficiency > CONVENTIONAL_EFFICIENCY_MAX:
         flags.append("drives_with_engine_off")  # hybrid or plug-in: the model's physics assumes the engine always runs
 
-    if not (litres and tests.nv_ratio):
+    nv_ratio = tests.nv_ratio if tests.nv_ratio and NV_RATIO_RANGE[0] <= tests.nv_ratio <= NV_RATIO_RANGE[1] else None
+    if not (litres and nv_ratio):
         flags.append("engine_braking_from_reference_car")
     result.supported = True
     result.values = {
         "marginal_wheel_efficiency": round(efficiency, 6),
         "idle_rate": round(idle * 3600, 6),
-        "coast_deceleration": round(_coast_deceleration_g(mass, road_si, litres, tests.nv_ratio), 6),
+        "coast_deceleration": round(_coast_deceleration_g(mass, road_si, litres, nv_ratio), 6),
         "enrichment_start_fraction": ENRICHMENT_START,
         "enrichment_max": ENRICHMENT_MAX,
         "drivetrain_factor": drivetrain,
@@ -190,7 +197,12 @@ def compute(tests: CarTests) -> CarParameters:
             "US-gal/hour",
             "The model's 0.25 gal/h for its 2.5 L Mazda5, scaled by this car's displacement" if litres else "The model's value; displacement unknown",
         ),
-        "coast_deceleration": ("g", "Road load at 30 mph plus engine braking scaled by displacement x N/V ratio, set so the model's 2012 Mazda5 keeps 0.05 g"),
+        "coast_deceleration": (
+            "g",
+            "Road load at 30 mph plus engine braking scaled by displacement x N/V ratio, set so the model's 2012 Mazda5 keeps 0.05 g"
+            if litres and nv_ratio
+            else "Road load at 30 mph plus the 2012 Mazda5's engine braking; this car's displacement or N/V ratio is missing or implausible",
+        ),
         "enrichment_start_fraction": ("rated power fraction", "The model's value; it applies to this car's own rated horsepower"),
         "enrichment_max": ("fraction", "The model's value; it applies to this car's own rated horsepower"),
         "drivetrain_factor": ("fraction", f"Assumed for {drive} drive" if drive else "The model's value; drive layout unknown"),
@@ -214,14 +226,17 @@ def label_mpg(ftp_mpg: float, hwy_mpg: float) -> dict[str, float]:
     return {"city": city, "highway": highway, "combined": 1 / (0.55 / city + 0.45 / highway)}
 
 
-def _hot_udds_mpg(tests: CarTests) -> float | None:
-    """MPG over a hot-start UDDS: bag 3 for its first 505 s, bag 2 for the rest. The FTP composite without bags."""
+def _hot_udds_mpg(tests: CarTests) -> tuple[float | None, bool]:
+    """(MPG over a hot-start UDDS, whether the FTP bags gave it): bag 3 for its first 505 s, bag 2
+    for the rest. The FTP composite stands in without bags, or when the bags disagree with it."""
     if tests.ftp_bag2_mpg and tests.ftp_bag3_mpg and tests.ftp_bag2_mpg > 0 and tests.ftp_bag3_mpg > 0:
         udds = _CYCLES["udds"]
         first = udds.start < UDDS_FIRST_BAG_S
         miles_first, miles_rest = float(udds.miles[first].sum()), float(udds.miles[~first].sum())
-        return (miles_first + miles_rest) / (miles_first / tests.ftp_bag3_mpg + miles_rest / tests.ftp_bag2_mpg)
-    return tests.ftp_mpg
+        hot = (miles_first + miles_rest) / (miles_first / tests.ftp_bag3_mpg + miles_rest / tests.ftp_bag2_mpg)
+        if not tests.ftp_mpg or BAGS_TO_FTP_RANGE[0] <= hot / tests.ftp_mpg <= BAGS_TO_FTP_RANGE[1]:
+            return hot, True
+    return tests.ftp_mpg, False
 
 
 def _work(cycle: _Cycle, mass: float, road: dict[str, float], usable_power_w: float) -> tuple[float, float]:

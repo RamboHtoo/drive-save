@@ -41,7 +41,9 @@ Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/dem
 
 ## Vehicles
 
-The app's car picker walks the vehicle list (the EPA Test Car List, model years 2010 to 2026) in three steps. None of them needs a token, so the picker can come before sign-up. Make and model go in the query string, URL-encoded: model names contain spaces and slashes, like `ACCORD EX/EX-L COUPE`. Matching ignores case and extra spaces.
+The app's car picker walks the vehicle list (the EPA Test Car List, model years 2010 to 2026) in three steps. None of them needs a token, so the picker can come before sign-up. Make and model go in the query string, URL-encoded: model names contain spaces, slashes, `&`, `#` and `+`, like `ACCORD EX/EX-L COUPE` and `RX 450h+ AWD`. Matching ignores case and extra spaces.
+
+Encode `+` as `%2B`. iOS's `URLComponents` leaves `+` unencoded; the server accepts that too, as long as spaces are sent as `%20`, which `URLComponents` does.
 
 1. `GET /vehicles/makes` returns `{"makes": ["Acura", "Alfa Romeo", ...]}`
 2. `GET /vehicles/models?make=Mazda` returns `{"make": "Mazda", "models": ["6", "CX-3", ..., "MAZDA5", ...]}`
