@@ -1,9 +1,10 @@
 """Database access for the API (Tiger Data: Postgres + TimescaleDB).
 
 Tables and analytics functions come from analytics/schema.sql and
-analytics/queries.sql (owned by the data teammate), plus
+analytics/queries.sql (schema v4, owned by the data teammate), plus
 backend/db/002_event_details.sql. The rules for uploads, baselines and metrics
-follow docs/database-setup.md.
+follow docs/database-setup.md. The API's crews are the schema's leagues: tables
+leagues and league_members, column league_id.
 """
 
 from collections.abc import Callable
@@ -89,9 +90,9 @@ async def _join(conn: asyncpg.Connection, crew_id: UUID, user_id: UUID) -> None:
     # One crew per driver: joining another crew moves them; rejoining the same crew keeps joined_at.
     await conn.execute(
         """
-        INSERT INTO crew_members (user_id, crew_id) VALUES ($1, $2)
-        ON CONFLICT (user_id) DO UPDATE SET crew_id = EXCLUDED.crew_id, joined_at = now()
-        WHERE crew_members.crew_id IS DISTINCT FROM EXCLUDED.crew_id
+        INSERT INTO league_members (user_id, league_id) VALUES ($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET league_id = EXCLUDED.league_id, joined_at = now()
+        WHERE league_members.league_id IS DISTINCT FROM EXCLUDED.league_id
         """,
         user_id,
         crew_id,
@@ -102,7 +103,7 @@ async def create_crew(name: str, creator_id: UUID, new_join_code: Callable[[], s
     for _ in range(5):  # retry on the rare join-code collision
         try:
             async with db.pool().acquire() as conn, conn.transaction():
-                crew_id = await conn.fetchval("INSERT INTO crews (name, join_code) VALUES ($1, $2) RETURNING id", name, new_join_code())
+                crew_id = await conn.fetchval("INSERT INTO leagues (name, join_code) VALUES ($1, $2) RETURNING id", name, new_join_code())
                 await _join(conn, crew_id, creator_id)
                 return crew_id
         except asyncpg.UniqueViolationError:
@@ -116,13 +117,13 @@ async def join_crew(crew_id: UUID, user_id: UUID) -> None:
 
 
 async def get_crew(crew_id: UUID) -> Crew | None:
-    row = await db.pool().fetchrow("SELECT id, name, join_code, is_demo FROM crews WHERE id = $1", crew_id)
+    row = await db.pool().fetchrow("SELECT id, name, join_code, is_demo FROM leagues WHERE id = $1", crew_id)
     if row is None:
         return None
     members = await db.pool().fetch(
         """
-        SELECT u.id, u.nickname, cm.joined_at FROM crew_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.crew_id = $1 ORDER BY cm.joined_at, u.nickname
+        SELECT u.id, u.nickname, cm.joined_at FROM league_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.league_id = $1 ORDER BY cm.joined_at, u.nickname
         """,
         crew_id,
     )
@@ -145,8 +146,9 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
 
         trip_id = await conn.fetchval(
             """
-            INSERT INTO trips (user_id, client_trip_id, crew_id, started_at, ended_at, distance_mi, avg_speed_mph, source, is_demo)
-            VALUES ($1, $2, (SELECT crew_id FROM crew_members WHERE user_id = $1), $3, $4, $5, $6, $7, $8)
+            INSERT INTO trips (user_id, client_trip_id, league_id, started_at, ended_at, distance_mi, avg_speed_mph, source, is_demo,
+                               events_complete, detector_version)
+            VALUES ($1, $2, (SELECT league_id FROM league_members WHERE user_id = $1), $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             """,
             user.user_id,
@@ -157,6 +159,8 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             trip.avg_speed_mph,
             trip.source,
             trip.is_demo,
+            trip.events_complete,
+            trip.detector_version,
         )
 
         result = cost_model.estimate(cost_model.build_input(cost_model.PricingRequest(trip_id, trip, user.vehicle)))
@@ -238,8 +242,8 @@ async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, 
     )
     await conn.execute(
         """
-        INSERT INTO trip_metrics (ts, trip_id, user_id, crew_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, is_baseline, is_demo)
-        SELECT started_at, id, user_id, crew_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, baseline_slot IS NOT NULL, is_demo
+        INSERT INTO trip_metrics (ts, trip_id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, is_baseline, is_demo)
+        SELECT started_at, id, user_id, league_id, scoring_config_id, distance_mi, fuel_gal, avoidable_usd, baseline_slot IS NOT NULL, is_demo
         FROM trips WHERE id = $1
         """,
         trip_id,
@@ -255,7 +259,10 @@ async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, 
 async def _load_trip(conn: asyncpg.Connection, trip_id: UUID) -> TripCreate:
     """Rebuilds the upload exactly as validated, to compare retries and to show the model input."""
     t = await conn.fetchrow(
-        "SELECT client_trip_id, started_at, ended_at, distance_mi, avg_speed_mph, source, is_demo FROM trips WHERE id = $1",
+        """
+        SELECT client_trip_id, started_at, ended_at, distance_mi, avg_speed_mph, source, is_demo, events_complete, detector_version
+        FROM trips WHERE id = $1
+        """,
         trip_id,
     )
     events = await conn.fetch(
@@ -277,6 +284,8 @@ async def _load_trip(conn: asyncpg.Connection, trip_id: UUID) -> TripCreate:
         avg_speed_mph=t["avg_speed_mph"],
         source=t["source"],
         is_demo=t["is_demo"],
+        events_complete=t["events_complete"],
+        detector_version=t["detector_version"],
         events=[TripEventIn(**dict(e)) for e in events],
         speed_samples=[SpeedSample(**dict(s)) for s in samples],
     )
@@ -408,12 +417,12 @@ async def progress(user_id: UUID) -> Progress:
 
 
 async def leaderboard(user_id: UUID, period: Period) -> Leaderboard:
-    crew_id = await db.pool().fetchval("SELECT crew_id FROM crew_members WHERE user_id = $1", user_id)
+    crew_id = await db.pool().fetchval("SELECT league_id FROM league_members WHERE user_id = $1", user_id)
     if crew_id is None:
         raise ApiError(404, "not_in_crew", "Create or join a crew to see its leaderboard")
     crew = await get_crew(crew_id)
     now = datetime.now(timezone.utc)
-    rows = await db.pool().fetch("SELECT * FROM drive_save_members($1, $2, $3)", now, crew.is_demo, crew_id)
+    rows = await db.pool().fetch("SELECT * FROM drive_save_leaderboard($1, $2, $3)", crew_id, now, crew.is_demo)
     return Leaderboard(
         crew_id=crew.crew_id,
         crew_name=crew.name,

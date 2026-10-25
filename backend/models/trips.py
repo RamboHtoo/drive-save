@@ -64,6 +64,10 @@ class TripCreate(StrictModel):
     avg_speed_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
     source: Literal["recorded", "replayed", "synthetic"] = Field(default="recorded", description="Replayed and synthetic trips must be demo trips")
     is_demo: bool = False
+    events_complete: bool = Field(default=False, description="True only when the phone's detector ran for the whole trip, so events lists every harsh moment")
+    detector_version: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"\S", description='Version of the detector that ran for the trip, e.g. "ios-0.1.0"'
+    )
     events: list[TripEventIn] = Field(default_factory=list)
     speed_samples: list[SpeedSample] = Field(
         default_factory=list,

@@ -83,6 +83,8 @@ def build_input(request: PricingRequest) -> CostModelInput:
             duration_s=(trip.ended_at - trip.started_at).total_seconds(),
             distance_mi=trip.distance_mi,
             avg_speed_mph=trip.avg_speed_mph,
+            events_complete=trip.events_complete,
+            detector_version=trip.detector_version,
             speed_samples=samples,
         ),
         vehicle=request.vehicle,

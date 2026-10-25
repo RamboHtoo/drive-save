@@ -43,13 +43,13 @@ The tests run against the local TimescaleDB (empty tables before each test). The
 | `routes/` | One file per resource: users, trips, crews, leaderboard |
 | `models/cost_model.py` | What the cost model receives and returns. See [`docs/cost-model.md`](../docs/cost-model.md) |
 | `services/cost_model.py` | Builds the cost model input and calls the model. Placeholder: $1 per event until the real model lands |
-| `db/002_event_details.sql` | Adds two event columns the cost model needs to the shared schema |
+| `db/002_event_details.sql` | Adds the sharp-turn angle (`heading_change_deg`) the backend stores to the shared schema |
 | `db/app_role.sql` | Least-privilege database role for the running app |
 | `scripts/test-db.sh` | Starts the local TimescaleDB used by tests and local runs |
-| `scripts/setup-tiger.sh` | One-time Tiger Cloud setup: schema, functions, the app role and the server's `DATABASE_URL`. See [`docs/deploy.md`](../docs/deploy.md) |
+| `scripts/setup-tiger.sh` | Backend setup on Tiger Cloud: checks the schema version, adds the event column, creates the app role and sets the server's `DATABASE_URL`. See [`docs/deploy.md`](../docs/deploy.md) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Production stack: the API behind Caddy with automatic HTTPS. See [`docs/deploy.md`](../docs/deploy.md) |
 
-The tables and analytics functions (`analytics/schema.sql`, `analytics/queries.sql`) belong to the data teammate; see [`docs/database-setup.md`](../docs/database-setup.md).
+The tables and analytics functions (`analytics/schema.sql`, `analytics/queries.sql`) belong to the data teammate; see [`docs/database-setup.md`](../docs/database-setup.md). They're at schema version 4, where crews are called leagues (`leagues`, `league_members`, `league_id`); the API keeps the crew names.
 
 ## Next steps
 

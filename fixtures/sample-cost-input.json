@@ -6,6 +6,8 @@
     "duration_s": 1080.0,
     "distance_mi": 6.4,
     "avg_speed_mph": 21.3,
+    "events_complete": true,
+    "detector_version": "ios-0.1.0",
     "speed_samples": [
       {
         "ts": "2026-10-24T20:07:02Z",

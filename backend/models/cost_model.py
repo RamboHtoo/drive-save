@@ -18,6 +18,8 @@ class TripInput(BaseModel):
     duration_s: float
     distance_mi: float
     avg_speed_mph: float
+    events_complete: bool = Field(description="True only when the phone's detector ran for the whole trip")
+    detector_version: str | None
     speed_samples: list[SpeedSample] = Field(description="Every GPS speed reading the phone sent, in time order")
 
 

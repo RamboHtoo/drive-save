@@ -13,7 +13,7 @@ import pytest
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://postgres:test@localhost:55432/postgres")
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL  # config reads it when the app is imported
 
-_TABLES = "users, crews, crew_members, scoring_configs, trips, trip_events, speed_samples, trip_metrics, savings_ledger, game_results"
+_TABLES = "users, leagues, league_members, scoring_configs, trips, trip_events, speed_samples, trip_metrics, savings_ledger, game_results"
 
 
 async def _query(sql: str, *args):

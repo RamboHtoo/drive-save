@@ -28,6 +28,8 @@ Replace its body, or import your function there, and keep the signature. The sch
 | `duration_s` | s | Derived: `ended_at` − `started_at` |
 | `distance_mi` | mi | Phone |
 | `avg_speed_mph` | mph | Phone |
+| `events_complete` | | Phone | `true` only when the detector ran for the whole trip; `false` if the phone didn't say |
+| `detector_version` | | Phone | e.g. `ios-0.1.0`; null if the phone didn't send it |
 | `speed_samples` | see below | Phone | Every GPS speed reading the phone sent, in time order |
 
 Each speed sample is `{"ts": "2026-10-24T20:07:02Z", "sample_seq": 0, "speed_mps": 15.423, "speed_accuracy_mps": 0.5}`: absolute UTC time, m/s, and the reading's accuracy in m/s. Invalid readings arrive with `speed_mps` and/or `speed_accuracy_mps` set to null.

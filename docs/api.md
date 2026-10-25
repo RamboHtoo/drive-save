@@ -59,6 +59,8 @@ Example request: [`fixtures/sample-trip.json`](../fixtures/sample-trip.json).
 | `avg_speed_mph` | number | 0 to 120 |
 | `source` | string, optional | `recorded` (default), `replayed` or `synthetic`. Replayed and synthetic trips must set `is_demo: true` |
 | `is_demo` | boolean, optional | Default `false`. Demo trips are labeled wherever they show up |
+| `events_complete` | boolean, optional | Default `false`. Set `true` only when the event detector ran for the whole trip, so `events` lists every harsh moment. The data teammate's fuel model gives incomplete trips an insufficient-data receipt |
+| `detector_version` | string, optional | Version of the detector that ran for the trip, e.g. `"ios-0.1.0"` (1 to 64 characters) |
 | `events[]` | list | Each event must fall inside the trip window; at most 10 events per minute |
 | `events[].event_id` | UUID | Generated on the phone, unique within the trip, unchanged when the trip is re-uploaded |
 | `events[].type` | string | `harsh_brake`, `rapid_accel` or `sharp_turn` |
@@ -111,5 +113,6 @@ Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.js
 ## Storage
 
 - Everything is stored in Tiger Data (Postgres + TimescaleDB), so restarts and redeploys keep users, crews and trips.
+- The database (schema version 4) calls crews leagues. The API keeps the crew names and routes, so nothing changes for the app.
 - Each trip is priced once, when it's uploaded, and the result is saved with it. `GET /trips/{trip_id}/receipt` returns `409` with `trip_not_scored` if the cost model couldn't price the trip.
 - Every harsh event costs a flat $1 until the real cost model lands, so progress and leaderboard amounts are placeholders too.

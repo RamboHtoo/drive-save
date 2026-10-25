@@ -83,7 +83,7 @@ def test_health_reports_the_database(client):
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
     assert res.json()["database"] == "ok"
-    assert res.json()["schema_version"] == 1
+    assert res.json()["schema_version"] == 4
 
 
 def test_missing_token_uses_error_format(client):
@@ -255,6 +255,26 @@ def test_uploads_follow_the_database_rules(client):
     assert [float(r["amount_usd"]) for r in ledger] == [2.0]
 
 
+def test_trip_keeps_detector_coverage_and_its_league(client):
+    _, headers = new_user(client)
+    crew = client.post("/crews", json={"name": "Roommates"}, headers=headers).json()
+    trip = fresh_trip()
+    created = upload(client, headers, trip)
+    assert created.status_code == 201
+    row = query("SELECT events_complete, detector_version, league_id FROM trips WHERE id = $1", uuid.UUID(created.json()["trip_id"]))[0]
+    assert (row["events_complete"], row["detector_version"], str(row["league_id"])) == (True, "ios-0.1.0", crew["crew_id"])
+    assert upload(client, headers, trip).json()["duplicate"] is True  # both fields round-trip, so the retry matches
+    assert upload(client, headers, {**trip, "events_complete": False}).status_code == 409
+
+    # App builds that don't send the fields yet: not complete, version unknown.
+    older = fresh_trip()
+    del older["events_complete"], older["detector_version"]
+    row = query("SELECT events_complete, detector_version FROM trips WHERE id = $1", uuid.UUID(upload(client, headers, older).json()["trip_id"]))[0]
+    assert (row["events_complete"], row["detector_version"]) == (False, None)
+
+    assert upload(client, headers, {**fresh_trip(), "detector_version": "   "}).status_code == 422
+
+
 def test_data_survives_a_server_restart():
     with TestClient(app) as before:
         _, headers = new_user(before)
@@ -306,6 +326,7 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_in
     assert inputs.trip.distance_mi == SAMPLE_TRIP["distance_mi"]
     assert inputs.trip.avg_speed_mph == SAMPLE_TRIP["avg_speed_mph"]
     assert inputs.trip.duration_s == 18 * 60
+    assert (inputs.trip.events_complete, inputs.trip.detector_version) == (True, "ios-0.1.0")
     # Every field the phone sent, for every event, in order.
     assert len(inputs.events) == len(SAMPLE_TRIP["events"])
     def as_sent(field, value):

@@ -6,6 +6,8 @@
   "avg_speed_mph": 21.3,
   "source": "recorded",
   "is_demo": false,
+  "events_complete": true,
+  "detector_version": "ios-0.1.0",
   "events": [
     {
       "event_id": "3f6c1a2e-0b7d-4e1a-9c55-0000000000a1",

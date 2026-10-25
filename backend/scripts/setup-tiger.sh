@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# One-time Tiger Cloud setup, run from the repo by someone who has the tsdbadmin password:
+# Backend setup on Tiger Cloud, run from the repo by someone who has the tsdbadmin password:
 #   backend/scripts/setup-tiger.sh "postgres://tsdbadmin@HOST:PORT/tsdb?sslmode=require"
 # Pass the service's connection string from Tiger Console without the password; the
-# script asks for it at a hidden prompt. It
-#   1. applies analytics/schema.sql (skipped if the schema is already there; stops
-#      without changing anything if Tiger is at another schema version)
-#   2. installs analytics/queries.sql (the functions the API calls)
-#   3. applies backend/db/002_event_details.sql
-#   4. creates the drivesave_app role, or gives it a new password if it exists
-#   5. checks drivesave_app can read the tables and call the functions, then writes
-#      its DATABASE_URL into backend/.env on the Vultr server
+# script asks for it at a hidden prompt. The data teammate installs and migrates the
+# schema and analytics functions (docs/database-setup.md); this script only adds what
+# the backend needs on top. It
+#   1. checks Tiger is at the schema version in analytics/schema.sql, and stops without
+#      changing anything if not
+#   2. applies backend/db/002_event_details.sql (an event column the backend stores)
+#   3. creates the drivesave_app role, or gives it a new password if it exists
+#   4. checks drivesave_app can read the tables and call the analytics functions
+#   5. writes its DATABASE_URL into backend/.env on the Vultr server
 # No password is printed, and it is safe to rerun.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -47,50 +48,43 @@ apply() {  # apply FILE (- for stdin), without the "already exists, skipping" no
   admin -c "SET client_min_messages = warning" -f "$1" > /dev/null
 }
 
-echo "1/5 Schema"
-repo_version=$(sed -n -E 's/.*schema_versions \(version\) VALUES \(([0-9]+)\).*/\1/p' analytics/schema.sql | sort -n | tail -1)
+echo "1/5 Schema version"
+expected=$(sed -n -E 's/.*schema_versions \(version\) VALUES \(([0-9]+)\).*/\1/p' analytics/schema.sql | sort -n | tail -1)
 has_schema=$(admin -tAc "SELECT to_regclass('public.schema_versions') IS NOT NULL")
-if [[ $has_schema == f ]]; then
-  apply analytics/schema.sql
-  echo "    applied analytics/schema.sql (version $repo_version)"
-else
+version=0
+if [[ $has_schema == t ]]; then
   version=$(admin -tAc "SELECT coalesce(max(version), 0) FROM public.schema_versions")
-  if [[ $version == 0 ]]; then
-    echo "public.schema_versions exists but is empty. Ask the data owner before applying schema.sql." >&2
-    exit 1
-  elif [[ $version != "$repo_version" ]]; then
-    # analytics/queries.sql must match the live tables, so never install it over another version.
-    echo "Tiger is at schema version $version, but this checkout's analytics/ SQL is version $repo_version." >&2
-    echo "Nothing was changed. Get the data teammate's SQL for version $version, then rerun." >&2
-    exit 1
-  fi
-  echo "    already at version $version, skipped"
 fi
+if [[ $version != "$expected" ]]; then
+  echo "Tiger is at schema version $version, but this checkout is written for version $expected." >&2
+  echo "Nothing was changed. The data teammate sets up and migrates the schema (docs/database-setup.md)." >&2
+  exit 1
+fi
+echo "    version $version, matching analytics/schema.sql"
 
-echo "2/5 Analytics functions"
-apply analytics/queries.sql
-echo "    installed $(admin -tAc "SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname LIKE 'drive\_save\_%'") functions"
-
-echo "3/5 Event columns"
+echo "2/5 Event column"
 apply backend/db/002_event_details.sql
-echo "    trip_events has duration_s and heading_change_deg"
+echo "    trip_events has heading_change_deg"
 
-echo "4/5 drivesave_app role"
+echo "3/5 drivesave_app role"
 sed "s/CHANGE_ME/$APP_PW/" backend/db/app_role.sql | apply -
 echo "    role ready with a new password"
 
-echo "5/5 Check and configure the server"
+echo "4/5 Check the role"
 run_psql "$APP_URL" "$APP_PW" -tA > /dev/null <<'SQL'
 SELECT max(version) FROM schema_versions;
 SELECT count(*) FROM users;
+SELECT count(*) FROM leagues;
 SELECT count(*) FROM daily_user_metrics;
-SELECT count(*) FROM drive_save_members(now(), false, NULL);
+SELECT count(*) FROM drive_save_leaderboard(gen_random_uuid(), now(), false);
 SELECT count(*) FROM drive_save_baseline(gen_random_uuid(), gen_random_uuid(), false);
 SELECT count(*) FROM drive_save_progress(gen_random_uuid(), gen_random_uuid(), false, now() - interval '8 weeks', now());
 SQL
 echo "    drivesave_app can read the tables and call the analytics functions"
+
+echo "5/5 Server"
 if [[ -n "$SKIP_SERVER" ]]; then
-  echo "    skipped the server (SKIP_SERVER is set)"
+  echo "    skipped (SKIP_SERVER is set)"
 else
   printf '%s\n' "postgres://drivesave_app:$APP_PW@${ADMIN_URL#*@}" | ssh -i "$SSH_KEY" -o BatchMode=yes "$SERVER" '
     read -r url

@@ -14,7 +14,7 @@ ALTER ROLE drivesave_app WITH LOGIN PASSWORD 'CHANGE_ME';
 
 GRANT USAGE ON SCHEMA public TO drivesave_app;
 GRANT SELECT, INSERT, UPDATE ON
-  public.users, public.crews, public.crew_members,
+  public.users, public.leagues, public.league_members,
   public.trips, public.trip_events, public.speed_samples,
   public.trip_metrics, public.savings_ledger, public.game_results
 TO drivesave_app;
