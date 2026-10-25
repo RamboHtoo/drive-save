@@ -149,6 +149,13 @@ final class BackendStub: URLProtocol {
         let protectedClient = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: protectedStore)
         do { _ = try await protectedClient.getVehicle(); throw BackendError.invalidInput("Expected expired session") }
         catch BackendError.expiredSession { try check(unexpectedRegistrations == 0 && protectedStore.credential?.userID == protectedID, "401 never silently replaces an ordinary driver identity") }
+        let recoveryStore = MemoryCredentialStore()
+        try recoveryStore.save(StoredCredential(userID: protectedID, nickname: "Htoo", token: "isolated-read-only-test", isDemoAccount: true))
+        let readOnlyClient = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: recoveryStore)
+        do { _ = try await readOnlyClient.currentLeaderboard(expectedOwnerID: protectedID); throw BackendError.invalidInput("Expected expired read-only session") }
+        catch BackendError.expiredSession { try check(unexpectedRegistrations == 0 && recoveryStore.credential?.userID == protectedID, "authenticated league discovery never replaces even a recovery-enabled identity on 401") }
+        do { _ = try await readOnlyClient.league(id: UUID(), expectedOwnerID: protectedID); throw BackendError.invalidInput("Expected expired private league session") }
+        catch BackendError.expiredSession { try check(unexpectedRegistrations == 0 && recoveryStore.credential?.token == "isolated-read-only-test", "private league verification preserves the existing token on 401") }
         let mockCredentials = MemoryCredentialStore()
         let mock = BackendAPIClient(credentialStore: mockCredentials)
         let mockUser = try await mock.register(nickname: "Offline", demoAccount: false)

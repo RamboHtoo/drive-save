@@ -189,12 +189,16 @@ struct APILeague: Codable, Identifiable {
     var canRank: Bool { active && member_count >= 4 }
 }
 struct APIStanding: Codable, Identifiable {
+    var weekly_avoidable_cost_usd: Double? = nil
+    var is_synthetic_demo: Bool? = nil
+    var estimate_source: String? = nil
     var state: String? = nil
     var availability: String {
         switch state {
         case "zero_baseline": return "No baseline waste"
         case "no_weekly_trips": return "No weekly trips"
         case "ready": return "Ready"
+        case "no_eligible_trips": return "Not ranked"
         default: return "Awaiting baseline"
         }
     }
@@ -202,7 +206,7 @@ struct APIStanding: Codable, Identifiable {
     let user_id: UUID
     let nickname: String
     let improvement_pct: Double?
-    let est_savings_usd: Double
+    let est_savings_usd: Double?
     let trips_counted: Int
     var id: UUID { user_id }
 }
@@ -216,6 +220,9 @@ struct APILeaderboard: Codable {
     let standings: [APIStanding]
     let is_demo: Bool
     let is_estimate: Bool
+    var ranking_metric: String? = nil
+    var demo_preview: Bool? = nil
+    var viewer_id: UUID? = nil
 }
 struct APIErrorEnvelope: Decodable {
     struct Body: Decodable {

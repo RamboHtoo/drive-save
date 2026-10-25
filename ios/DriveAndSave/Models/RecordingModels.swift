@@ -78,6 +78,27 @@ struct GPSScoringWindow {
     }
 }
 
+/// Real recent observations, retained for asynchronous GPS/IMU callback ordering.
+/// Select by measurement time, never replace or shift a reading to cover a motion timestamp.
+struct DetectorGPSHistory {
+    private var samples: [APISpeedSample] = []
+    mutating func observe(_ sample: APISpeedSample) {
+        guard sample.ts.timeIntervalSince1970.isFinite else { return }
+        samples.append(sample)
+        samples.sort { $0.ts < $1.ts }
+        if let latest = samples.last?.ts {
+            samples.removeAll { latest.timeIntervalSince($0.ts) > 10 }
+        }
+        if samples.count > 128 { samples.removeFirst(samples.count - 128) }
+    }
+    func observation(at time: Date) -> APISpeedSample? {
+        samples.last { $0.ts <= time }
+    }
+    func speed(at time: Date) -> Double? {
+        GPSScoringWindow.freshSpeed(observation(at: time), at: time)
+    }
+}
+
 struct GPSQualitySummary: Codable, Hashable {
     let startupSeconds: Double?
     let trailingSeconds: Double?
@@ -125,6 +146,7 @@ struct DetectorCoverage: Codable, Hashable {
         let first: Double
         var last: Double
         let eligible: Bool
+        var reason: String? = nil
     }
     let startedUptime: Double
     private(set) var firstObservation: Double?
@@ -135,14 +157,14 @@ struct DetectorCoverage: Codable, Hashable {
     mutating func invalidate(_ reason: String) {
         if !failures.contains(reason) { failures.append(reason) }
     }
-    mutating func observe(uptime: Double, eligible: Bool = true) {
+    mutating func observe(uptime: Double, eligible: Bool = true, reason: String? = nil) {
         guard uptime.isFinite, uptime >= startedUptime else { return }
         if let lastObservation, uptime <= lastObservation { invalidate("Non-monotonic detector samples"); return }
         if firstObservation == nil { firstObservation = uptime }
         if runs == nil { runs = [] }
-        if let previous = runs?.last, previous.eligible == eligible, uptime - previous.last <= 1 {
+        if let previous = runs?.last, previous.eligible == eligible, previous.reason == reason, uptime - previous.last <= 1 {
             runs![runs!.count - 1].last = uptime
-        } else { runs?.append(.init(first: uptime, last: uptime, eligible: eligible)) }
+        } else { runs?.append(.init(first: uptime, last: uptime, eligible: eligible, reason: reason)) }
         lastObservation = uptime
     }
     func complete(from start: Double, through end: Double) -> Bool {
@@ -191,7 +213,7 @@ struct DetectionConfiguration: Codable, Hashable {
 
 /// Candidate detection only; thresholds require real-device validation.
 struct CandidateEventDetector {
-    static let version = "ios-0.3.0"
+    static let version = "ios-0.3.1"
     var configuration = DetectionConfiguration()
     private var starts: [DrivingEventKind: Double] = [:]
     private var peaks: [DrivingEventKind: Double] = [:]

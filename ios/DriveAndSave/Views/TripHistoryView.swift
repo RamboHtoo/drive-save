@@ -29,6 +29,9 @@ struct TripHistoryView: View {
                         }
                         if developerMode { Text(trip.displayTitle).font(.headline) }
                         Text(trip.isIncompleteRecording ? "Incomplete recording" : trip.distanceLabel).font(.subheadline).foregroundStyle(DS.secondary)
+                        if trip.recording != nil && !trip.isWalkingTest {
+                            Text(backend.uploadDiagnostics(for: trip).state.rawValue).font(.caption).foregroundStyle(DS.secondary)
+                        }
                         if trip.source == .simulated { Text("Demo").font(.caption).foregroundStyle(DS.secondary) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .foregroundStyle(DS.ink).padding(.vertical, 16)
@@ -41,7 +44,7 @@ struct TripHistoryView: View {
     private func amount(for trip: Trip) -> String {
         if trip.isWalkingTest { return "GPS test" }
         if let receipt = backend.receipt(for: trip) { return "Est. " + receipt.avoidable_cost_usd.receiptDollars }
-        if trip.isIncompleteRecording { return "" }
+        if trip.isIncompleteRecording || trip.recording != nil { return "" }
         return trip.hasEstimate ? "Est. " + trip.avoidableCost.dollars : "Pending"
     }
 }

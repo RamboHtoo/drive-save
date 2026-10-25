@@ -27,7 +27,7 @@ The executable estimator already scores the observed GPS interval and gates on t
 
 On iOS, actual Core Motion uptimes are persisted as eligible/ineligible runs. Completeness requires observations before/at the first GPS time and after/at the last GPS time, no ineligible observations inside that window, no sampling gap over one second intersecting it, and no genuine interruption or calibration failure. Coverage is not inferred from an empty event list. A red-light stop can remain complete with actual motion samples and fresh valid low-speed GPS. Missing/stale/invalid GPS cannot establish a stationary stop. Missing motion cannot establish monitoring.
 
-The session and all events must have consistent detector versions. New sessions use `ios-0.3.0` because monitoring eligibility changed; detector thresholds, sampling frequencies, event smoothing and financial equations did not change. Legacy records without coverage/version metadata remain unknown and cannot gain completeness retroactively. `events_complete` and `detector_version` are uploaded from the saved session. Walking tests and generated simulator sessions never assert genuine detector completeness.
+The session and all events must have consistent detector versions. New sessions use `ios-0.3.1` after the GPS/Core Motion callback-ordering correction (saved `ios-0.3.0` sessions retain their original version); detector thresholds, sampling frequencies, event smoothing and financial equations did not change. Legacy records without coverage/version metadata remain unknown and cannot gain completeness retroactively. `events_complete` and `detector_version` are uploaded from the saved session. Walking tests and generated simulator sessions never assert genuine detector completeness.
 
 ## Partial GPS warning diagnosis
 
@@ -37,7 +37,7 @@ The recorder now tracks first/last reliable position measurement times and maxim
 
 Position quality and speed quality are separate: position accuracy must pass the existing 35 m distance filter; speed must independently pass the stricter backend accuracy rule for monitoring/scoring. A valid position with unavailable speed can contribute honest position distance but cannot establish detector completeness. The new saved startup/trailing/maximum-gap diagnostics are available only under Developer Mode.
 
-The reported stationary and 0.04 mi / 1:07 walking tests have no raw exports in this workspace. Their precise historical cause cannot be established from the summary alone. Stationary unavailable speed and near-zero gravity-corrected acceleration are plausible; zero distance earns no estimate. A walking distance proves neither driving eligibility nor GPS speed quality. Walking remains excluded from driving uploads and league scoring.
+The subsequent [physical upload investigation](RecordingUploadInvestigation.md) inspected the connected iPhone read-only. The 0.0392 mi / 67.912 s capture has no valid scoring-speed observations and saved a genuine GPS-gap interruption. Stationary unavailable speed and near-zero gravity-corrected acceleration are plausible; zero distance earns no estimate. A walking distance proves neither driving eligibility nor GPS speed quality. Walking remains excluded from driving uploads and league scoring.
 
 ## Private league and account integrity
 

@@ -1,5 +1,7 @@
 # Final iOS integration report
 
+This is the historical v2 integration baseline. See [Physical recording upload investigation](RecordingUploadInvestigation.md) for the subsequent read-only iPhone evidence, detector 0.3.1 callback fix, and current diagnostics/test results.
+
 Work is on `ios`, restricted to `/ios`. No deployment, backend/analytics edits, financial equation changes or production mutations were performed.
 
 ## Files changed

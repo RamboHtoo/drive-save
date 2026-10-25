@@ -64,7 +64,7 @@ final class RecordingFlowTests: XCTestCase {
         if !stop.isHittable { app.swipeUp() }
         stop.tap()
         XCTAssertTrue(app.staticTexts["Simulator test drive"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Insufficient recording data")
+        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Not eligible for upload")
         XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].exists)
         XCTAssertFalse(app.otherElements["tripTimeline"].exists)
         app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch.tap()
@@ -78,11 +78,39 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Simulator test drive"].firstMatch.exists)
         app.staticTexts["Simulator test drive"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Not eligible for upload", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
         app.openMain("Leagues")
         XCTAssertTrue(app.staticTexts["leagueHeadline"].waitForExistence(timeout: 5))
         app.openMain("Home")
         XCTAssertTrue(app.staticTexts["Drive Save"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLocalRecordingShowsDeveloperUploadDiagnostics() throws {
+        let app = XCUIApplication(); app.launchOffline()
+        app.buttons["startTrip"].tap()
+        app.segmentedControls.buttons["Demo Drive"].tap()
+        app.confirmParkedMount()
+        app.scrollFullyIntoView(app.buttons["beginRecording"]); app.buttons["beginRecording"].tap()
+        XCTAssertTrue(app.buttons["stopTrip"].waitForExistence(timeout: 5))
+        app.scrollFullyIntoView(app.buttons["stopTrip"]); app.buttons["stopTrip"].tap()
+        XCTAssertTrue(app.staticTexts["tripUploadState"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["tripUploadState"].label, "Not eligible for upload")
+        let diagnostics = app.buttons["recordingDiagnostics"]
+        app.scrollFullyIntoView(diagnostics); diagnostics.tap()
+        let summary = app.staticTexts["recordingUploadSummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        for field in ["Offline mode · no backend POST", "Preflight:", "GPS samples:", "Largest valid-speed GPS gap:", "Motion samples:", "Calibration at end:", "events_complete:", "detector_version:"] {
+            XCTAssertTrue(summary.label.contains(field), "Missing diagnostic field: " + field)
+        }
+        XCTAssertFalse(app.buttons["Upload / retry & fetch receipt"].exists, "Ineligible fixtures must stay local")
+        let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = "Developer recording upload diagnostics"; attachment.lifetime = .keepAlways; add(attachment)
+        app.terminate(); app.launchOffline(developerMode: false)
+        app.openMain("History")
+        let recording = app.buttons.matching(identifier: "historyTrip-Simulator test drive").firstMatch
+        app.scrollFullyIntoView(recording); recording.tap()
+        XCTAssertFalse(app.buttons["recordingDiagnostics"].exists, "Technical summary is hidden during ordinary app use")
+        XCTAssertFalse(app.staticTexts["recordingUploadSummary"].exists)
     }
 
     @MainActor
@@ -101,7 +129,7 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recording ended"].waitForExistence(timeout: 5))
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Not eligible for upload", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
     }
 
     @MainActor
@@ -121,7 +149,7 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recording ended"].waitForExistence(timeout: 5))
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Not eligible for upload", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
     }
 
     @MainActor
@@ -175,7 +203,7 @@ final class RecordingFlowTests: XCTestCase {
         app.scrollFullyIntoView(saved); saved.tap()
         XCTAssertTrue(app.staticTexts["Vehicle recorded: 2012 Mazda MAZDA5"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Vehicle recorded: 2026 Tesla Cybertruck AWD"].exists)
-        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Insufficient recording data")
+        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Not eligible for upload")
     }
 
     @MainActor
@@ -459,14 +487,14 @@ extension XCUIApplication {
         destination.tap()
     }
     @MainActor
-    func launchOffline(developerMode: Bool = true) {
+    func launchOffline(developerMode: Bool = true, presenterNickname: String = "HackPSU Demo") {
         if !launchArguments.contains(where: { $0.hasPrefix("--account-test-id=") }) {
             launchArguments.append("--account-test-id=" + UUID().uuidString)
         }
         launch()
         let nickname = textFields["welcomeNickname"]
         if nickname.waitForExistence(timeout: 3) {
-            nickname.tap(); nickname.typeText("HackPSU Demo\n")
+            nickname.tap(); nickname.typeText(presenterNickname + "\n")
             buttons["Developer options"].tap()
             switches["offlineOnboarding"].tap()
             let register = buttons["welcomeRegister"]

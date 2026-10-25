@@ -79,11 +79,11 @@ actor BackendAPIClient {
         if case .mock = mode { guard let selectedVehicle else { throw BackendError.invalidInput("No vehicle selected.") }; return selectedVehicle }
         return try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "GET"))
     }
-    func upload(_ payload: APITripPayload, vehicle: VehicleRow, expectedOwnerID: UUID? = nil) async throws -> APITripCreated {
+    func upload(_ payload: APITripPayload, vehicle: VehicleRow, expectedOwnerID: UUID? = nil, willPost: (@Sendable () async throws -> Void)? = nil) async throws -> APITripCreated {
         if case .remote = mode {
             guard payload.is_demo == demoOnly else { throw BackendError.invalidInput("Demo uploads require an isolated replay account; real uploads require the normal driver account.") }
         }
-        return try await uploadBody(payload, data: APIJSON.encoder().encode(payload), vehicle: vehicle, expectedOwnerID: expectedOwnerID)
+        return try await uploadBody(payload, data: APIJSON.encoder().encode(payload), vehicle: vehicle, expectedOwnerID: expectedOwnerID, willPost: willPost)
     }
     /// Calculation tests may only run through an isolated demo client, never the driver's client.
     func ensureCalculationIdentity(driverID: UUID) async throws {
@@ -98,7 +98,7 @@ actor BackendAPIClient {
         }
         return try await uploadBody(payload, data: data, vehicle: vehicle)
     }
-    private func uploadBody(_ payload: APITripPayload, data: Data, vehicle: VehicleRow, expectedOwnerID: UUID? = nil) async throws -> APITripCreated {
+    private func uploadBody(_ payload: APITripPayload, data: Data, vehicle: VehicleRow, expectedOwnerID: UUID? = nil, willPost: (@Sendable () async throws -> Void)? = nil) async throws -> APITripCreated {
         try TripUploadBuilder.validate(payload)
         if !payload.is_demo && vehicle["supported"] == .bool(false) {
             throw BackendError.invalidInput("This vehicle is not supported for fuel estimates. Your trip remains on this iPhone.")
@@ -121,7 +121,7 @@ actor BackendAPIClient {
             mockUploads[payload.client_trip_id] = (data, result, receipt)
             return result
         }
-        let created = try APIJSON.decoder().decode(APITripCreated.self, from: await request("trips", method: "POST", body: data, recover: expectedOwnerID == nil))
+        let created = try APIJSON.decoder().decode(APITripCreated.self, from: await request("trips", method: "POST", body: data, recover: expectedOwnerID == nil, willSend: willPost))
         try checkOwner(expectedOwnerID)
         return created
     }
@@ -164,15 +164,38 @@ actor BackendAPIClient {
         }
         return try APIJSON.decoder().decode(APILeague.self, from: await request("crews/\(id)/join", method: "POST", body: APIJSON.encoder().encode(["join_code": code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()])))
     }
-    func league(id: UUID) async throws -> APILeague {
+    func league(id: UUID, expectedOwnerID: UUID? = nil) async throws -> APILeague {
+        try checkOwner(expectedOwnerID)
         if case .mock = mode { guard let mockLeague else { throw BackendError.server(404, nil) }; return mockLeague }
-        return try APIJSON.decoder().decode(APILeague.self, from: await request("crews/\(id)", method: "GET"))
+        let value = try APIJSON.decoder().decode(APILeague.self, from: await request("crews/\(id)", method: "GET", recover: expectedOwnerID == nil))
+        try checkOwner(expectedOwnerID)
+        return value
     }
     func leaderboard(id: UUID) async throws -> APILeaderboard {
-        if case .mock = mode { return APILeaderboard(crew_id: id, crew_name: mockLeague?.name ?? "Offline league", member_count: mockLeague?.member_count ?? 0, active: mockLeague?.canRank ?? false, period: "week", generated_at: Date(), standings: [], is_demo: true, is_estimate: true) }
-        return try APIJSON.decoder().decode(APILeaderboard.self, from: await request("leaderboard", method: "GET"))
+        try await currentLeaderboard() // Compatibility argument; never sent as a guessed league ID.
     }
-    private func request(_ path: String, method: String, body: Data? = nil, protected: Bool = true, recover: Bool = true, query: [URLQueryItem] = []) async throws -> Data {
+    func currentLeaderboard(expectedOwnerID: UUID? = nil) async throws -> APILeaderboard {
+        try checkOwner(expectedOwnerID)
+        if case .mock = mode { guard let id = mockLeague?.crew_id else { throw BackendError.server(404, nil) }; return APILeaderboard(crew_id: id, crew_name: mockLeague?.name ?? "Offline league", member_count: mockLeague?.member_count ?? 0, active: mockLeague?.canRank ?? false, period: "week", generated_at: Date(), standings: [], is_demo: true, is_estimate: true) }
+        let value = try APIJSON.decoder().decode(APILeaderboard.self, from: await request("leaderboard", method: "GET", recover: expectedOwnerID == nil))
+        try checkOwner(expectedOwnerID)
+        return value
+    }
+    func costLeaderboard() async throws -> APILeaderboard {
+        if case .mock = mode { return try await currentLeaderboard() }
+        do {
+            return try APIJSON.decoder().decode(APILeaderboard.self, from: await request("leaderboard/costs", method: "GET"))
+        } catch BackendError.server(404, let body) where body == nil {
+            // The currently deployed API may not have the reviewed extension yet.
+            return try await currentLeaderboard()
+        }
+    }
+    func leagueShowcase() async throws -> APILeaderboard {
+        guard case .remote = mode else { throw BackendError.invalidInput("Use the explicitly labeled offline fixture in the view model.") }
+        return try APIJSON.decoder().decode(APILeaderboard.self, from: await request("leaderboard/demo", method: "GET", recover: false))
+    }
+
+    private func request(_ path: String, method: String, body: Data? = nil, protected: Bool = true, recover: Bool = true, query: [URLQueryItem] = [], willSend: (@Sendable () async throws -> Void)? = nil) async throws -> Data {
         guard case .remote(let baseURL) = mode, baseURL.scheme == "https" else { throw BackendError.invalidInput("Remote API requires HTTPS.") }
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {
@@ -188,6 +211,7 @@ actor BackendAPIClient {
             guard let credential else { throw BackendError.expiredSession }
             request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
         }
+        try await willSend?() // Persist attempt immediately before handing the prepared request to URLSession.
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw BackendError.invalidResponse }
         if response.statusCode == 401 && protected {
@@ -195,7 +219,7 @@ actor BackendAPIClient {
             _ = try await replaceCredential(nickname: old.nickname, demoAccount: true)
             resetNotice = "The server rejected the saved session and may have been reset. A new demo user was registered. Previous server trips and league membership may no longer exist; local history is safe."
             if let selectedVehicle { _ = try await self.request("users/me/vehicle", method: "PUT", body: APIJSON.encoder().encode(selectedVehicle), recover: false) }
-            return try await self.request(path, method: method, body: body, protected: protected, recover: false, query: query)
+            return try await self.request(path, method: method, body: body, protected: protected, recover: false, query: query, willSend: willSend)
         }
         guard (200...299).contains(response.statusCode) else { throw BackendError.server(response.statusCode, (try? APIJSON.decoder().decode(APIErrorEnvelope.self, from: data))?.error) }
         return data

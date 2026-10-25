@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CrewLeaderboardView: View {
     @EnvironmentObject private var backend: BackendViewModel
+    @AppStorage("developerMode") private var developerMode = false
     var body: some View {
         Screen {
             if !backend.isRemote { Eyebrow(text: "Offline demo · no multiplayer") }
@@ -13,20 +14,24 @@ struct CrewLeaderboardView: View {
                     Text("\(league.member_count) \(league.member_count == 1 ? "member" : "members") · \(league.canRank ? "Ranked" : "4 needed to rank")").font(.headline)
 
                     LeagueInviteActions(league: league)
+                    if developerMode {
+                        NavigationLink("Demo showcase") { LeagueDemoShowcaseView() }
+                            .accessibilityIdentifier("openLeagueShowcase")
+                    }
                 }
                 if league.canRank {
                     Eyebrow(text: "Standings")
                     if backend.leaderboardIsDemo && !league.is_demo { Eyebrow(text: "Demo league · experimental scoring") }
                     if backend.standings.isEmpty {
-                        Text("Rankings begin after 3 eligible trips per driver.").foregroundStyle(DS.secondary)
+                        Text(backend.leaderboardMetric == "weekly_avoidable_cost_usd" ? "No scored trips this week." : "Weekly cost ranking requires a backend update.").foregroundStyle(DS.secondary)
                         ForEach(league.members) { member in
-                            ChampionshipRow(rank: nil, name: member.nickname, result: "Awaiting baseline", detail: "", isCurrent: member.user_id == backend.identity?.userID)
+                            ChampionshipRow(rank: nil, name: member.nickname, result: "Not ranked", detail: "", isCurrent: member.user_id == backend.identity?.userID)
                         }
                     }
                     ForEach(backend.standings) { standing in
-                        ChampionshipRow(rank: standing.rank, name: standing.nickname,
-                            result: standing.improvement_pct.map { String(format: "%.1f%% improvement", $0) } ?? standing.availability,
-                            detail: standing.rank == nil ? "" : "\(standing.trips_counted) trips · \(standing.est_savings_usd.receiptDollars) estimated",
+                        ChampionshipRow(rank: backend.leaderboardMetric == "weekly_avoidable_cost_usd" ? standing.rank : nil, name: standing.nickname,
+                            result: backend.leaderboardMetric == "weekly_avoidable_cost_usd" ? (standing.weekly_avoidable_cost_usd?.receiptDollars ?? "Not ranked") : "Not ranked",
+                            detail: backend.leaderboardMetric == "weekly_avoidable_cost_usd" ? "Weekly estimated avoidable fuel cost" : (standing.improvement_pct.map { String(format: "%.1f%% improvement · weekly cost ranking unavailable", $0) } ?? "Weekly cost ranking unavailable on this server"),
                             isCurrent: standing.user_id == backend.identity?.userID)
                     }
                 } else {

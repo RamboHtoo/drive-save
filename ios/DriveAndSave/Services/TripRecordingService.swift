@@ -49,7 +49,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
     private var recordingContext: RecordingContext?
     private var detectorCoverage = DetectorCoverage(startedUptime: 0)
     private var gpsQualityTracker: GPSQualityTracker?
-    private var latestDetectorGPS: APISpeedSample?
+    private var detectorGPS = DetectorGPSHistory()
     private var gpsQualitySummary: GPSQualitySummary? { gpsQualityTracker?.summary(through: endedAt ?? Date()) }
     private var locationWasUnavailable: Bool { gpsQualitySummary?.isPartial == true }
     private var hasMotion = false
@@ -124,7 +124,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
 
     func prepare(mode: Mode) {
         stopHardware()
-        telemetrySpeed = nil; latestDetectorGPS = nil
+        telemetrySpeed = nil; detectorGPS = DetectorGPSHistory()
         self.mode = mode
         isCalibrated = false
         calibrationRequested = false
@@ -186,7 +186,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         startedAt = Date(); startedUptime = ProcessInfo.processInfo.systemUptime
         endedAt = nil; endedUptime = nil; recordingContext = context
         gpsQualityTracker = GPSQualityTracker(startedAt: startedAt!)
-        latestDetectorGPS = nil
+        detectorGPS = DetectorGPSHistory()
         detectorCoverage = DetectorCoverage(startedUptime: startedUptime)
         if mode != .device || !isCalibrated || !hasMotion {
             detectorCoverage.invalidate("Calibrated device detector unavailable at start")
@@ -291,13 +291,23 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         let value = MotionSample(timestamp: observedAt, uptime: sample.timestamp, userAcceleration: acceleration, rotationRate: rotation, attitude: attitude, forwardAcceleration: forwardValue, lateralAcceleration: lateralValue)
         latestMotion = value
         if isRecording {
-            detectorCoverage.observe(uptime: sample.timestamp, eligible: forwardValue?.isFinite == true && lateralValue?.isFinite == true && detectionSpeed(at: observedAt) != nil)
+            let monitoringFailure: String?
+            if forwardValue?.isFinite != true || lateralValue?.isFinite != true {
+                monitoringFailure = "Calibrated finite vehicle-axis motion unavailable"
+            } else if detectorGPS.observation(at: observedAt) == nil {
+                monitoringFailure = "No GPS speed observation available at motion observation time"
+            } else if !GPSScoringWindow.valid(detectorGPS.observation(at: observedAt)!) {
+                monitoringFailure = "GPS speed or speed accuracy invalid (requires 0–53.6448 m/s and accuracy 0–2 m/s)"
+            } else if detectionSpeed(at: observedAt) == nil {
+                monitoringFailure = "GPS speed stale (over 3 s) or later than motion observation"
+            } else { monitoringFailure = nil }
+            detectorCoverage.observe(uptime: sample.timestamp, eligible: monitoringFailure == nil, reason: monitoringFailure)
             motionSamples.append(value)
         }
     }
 
     private func detectionSpeed(at date: Date) -> Double? {
-        GPSScoringWindow.freshSpeed(latestDetectorGPS, at: date)
+        detectorGPS.speed(at: date)
     }
 
     private func tick() {
@@ -345,7 +355,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         case .denied, .restricted:
             locationStatus = distanceAvailable ? "Location denied · saved distance is partial" : "Location denied · distance unavailable"
             gpsAccuracyMeters = nil
-            telemetrySpeed = nil; latestDetectorGPS = nil
+            telemetrySpeed = nil; detectorGPS = DetectorGPSHistory()
             location.stopUpdatingLocation(); lastLocation = nil
             if isRecording { noteInterruption("Location permission unavailable; distance may be missing or partial.") }
         case .notDetermined: locationStatus = "Location permission not requested"
@@ -357,9 +367,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         guard isRecording && mode != .simulator && isLocationAuthorized else { return }
         for point in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
             if point.sourceInformation?.isSimulatedBySoftware == true { softwareSimulatedGPS = true }
-            if latestDetectorGPS == nil || point.timestamp >= latestDetectorGPS!.ts {
-                latestDetectorGPS = .init(ts: point.timestamp, sample_seq: 0, speed_mps: point.speed, speed_accuracy_mps: point.speedAccuracy)
-            }
+            detectorGPS.observe(.init(ts: point.timestamp, sample_seq: 0, speed_mps: point.speed, speed_accuracy_mps: point.speedAccuracy))
             if telemetrySpeed == nil || point.timestamp >= telemetrySpeed!.timestamp {
                 telemetrySpeed = .init(timestamp: point.timestamp, metersPerSecond: point.speed, accuracyMetersPerSecond: point.speedAccuracy, horizontalAccuracyMeters: point.horizontalAccuracy)
             }
@@ -391,7 +399,7 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         locationStatus = distanceAvailable ? "GPS unavailable · saved distance is partial" : "GPS unavailable · no usable distance yet"
         let locationError = error as? CLError
         if locationError?.code == .denied {
-            latestDetectorGPS = nil
+            detectorGPS = DetectorGPSHistory()
             noteInterruption("Location access was denied. Distance may be unavailable or incomplete; enable location in Settings for your next recording.")
         } else {
             // locationUnknown is advisory; actual observation timestamps determine missing coverage.

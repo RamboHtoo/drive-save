@@ -29,7 +29,7 @@ struct TripRecordingView: View {
                         NavigationLink { TripReceiptView(trip: savedTrip) } label: {
                             Label("Open trip receipt", systemImage: "receipt").font(.headline).frame(maxWidth: .infinity).padding()
                         }.buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("openReceipt")
-                        Text("You can also find it in History.").foregroundStyle(DS.secondary)
+                        Text("You can also find it in History. Eligible drives upload when you choose Get estimate on the receipt.").foregroundStyle(DS.secondary)
                     } else if began {
                         recordingContent
                     } else {

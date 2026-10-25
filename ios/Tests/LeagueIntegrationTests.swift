@@ -46,6 +46,7 @@ final class BackendStub: URLProtocol {
         var status = 200, code = "", reads = 0, rankingForbidden = false
         BackendStub.handler = { request in
             guard request.value(forHTTPHeaderField: "Authorization") == "Bearer offline-test-token" else { throw BackendError.invalidInput("Unexpected credentials") }
+            if request.url!.path == "/leaderboard/costs" { return (404, Data()) }
             if request.url!.path.hasSuffix("/leaderboard") {
                 return (403, Data("{\"error\":{\"code\":\"forbidden\",\"message\":\"rank denied\"}}".utf8))
             }
@@ -94,26 +95,45 @@ final class BackendStub: URLProtocol {
         let otherRow = try Data(contentsOf: URL(fileURLWithPath: "DriveAndSave/MockData/Backend/catalog-cybertruck.json"))
         restored.selectVehicle(json: String(decoding: otherRow, as: UTF8.self), confirmed: true)
         var posts = 0, receiptReads = 0
+        var failVehicle = false, failPost = false, failReceipt = false, scoreReceipt = false
         let serverTrip = UUID()
+        var permittedIDs: Set<UUID> = [local.clientTripID!]
         BackendStub.handler = { request in
             if request.url!.path == "/users/me/vehicle" {
+                if failVehicle { return (500, Data()) }
                 let submitted = try APIJSON.decoder().decode(VehicleRow.self, from: request.httpBody!)
                 guard submitted == row else { throw BackendError.invalidInput("Starting vehicle substituted") }
                 return (200, rowData)
             }
             if request.url!.path == "/trips" {
                 posts += 1
+                if failPost { throw URLError(.networkConnectionLost) }
                 let submitted = try APIJSON.decoder().decode(APITripPayload.self, from: request.httpBody!)
-                guard submitted.client_trip_id == local.clientTripID else { throw BackendError.invalidInput("UUID changed") }
+                guard permittedIDs.contains(submitted.client_trip_id) else { throw BackendError.invalidInput("UUID changed") }
                 return (201, try APIJSON.encoder().encode(APITripCreated(trip_id: serverTrip, receipt_url: "/trips/\(serverTrip)/receipt", duplicate: false)))
             }
             if request.url!.path.hasSuffix("/receipt") {
                 receiptReads += 1
+                if failReceipt { throw URLError(.networkConnectionLost) }
+                if scoreReceipt {
+                    var receipt = try APIJSON.decoder().decode(APIReceipt.self, from: Data(contentsOf: URL(fileURLWithPath: "DriveAndSave/MockData/Backend/calculation-receipt.json")))
+                    receipt.trip_id = serverTrip
+                    return (200, try APIJSON.encoder().encode(receipt))
+                }
                 return (422, Data("{\"error\":{\"code\":\"trip_not_scored\",\"message\":\"controlled missing evidence\"}}".utf8))
             }
             return (500, Data()) // Progress is intentionally unavailable; never substituted with money.
         }
+        try check(restored.uploadDiagnostics(for: local).state == .ready && posts == 0, "saving/selecting a local trip does not initiate POST")
+        var invalid = local; invalid.clientTripID = UUID(); invalid.recording?.eventsComplete = false
+        await restored.upload(trip: invalid)
+        let blocked = restored.uploadDiagnostics(for: invalid)
+        try check(posts == 0 && blocked.state == .notEligible && blocked.trace?.postAttemptedAt == nil, "known-invalid recording never reaches POST")
+        try check(blocked.trace?.stage == .preflight && blocked.preflightFailure == restored.unsupportedReason(for: invalid), "real gate and displayed preflight use identical failure order")
         await restored.upload(trip: local)
+        let refused = restored.uploadDiagnostics(for: local)
+        try check(refused.state == .notScored && refused.serverTripID == serverTrip && refused.trace?.postAttemptCount == 1, "POST acceptance plus scoring refusal is explicitly tracked")
+        try check(refused.trace?.lastError?.contains("trip_not_scored") == true, "server refusal preserves HTTP error code for diagnostics")
         await restored.upload(trip: local)
         try check(posts == 1 && receiptReads == 2, "receipt retry reuses saved server trip without duplicate POST")
         try check(restored.insufficientReason(for: local)?.contains("controlled missing evidence") == true && restored.receipt(for: local) == nil, "refused receipt retains reason and no financial result")
@@ -125,6 +145,38 @@ final class BackendStub: URLProtocol {
         await reread.connect(remote: true, baseURL: "https://integration.invalid", client: client)
         await reread.upload(trip: local)
         try check(posts == 1 && receiptReads == 3, "persisted retry keeps original UUID and vehicle after relaunch")
+        try check(reread.uploadDiagnostics(for: local).state == .notScored && reread.uploadDiagnostics(for: local).trace?.postAttemptCount == 1, "acceptance, refusal and actual POST count survive relaunch")
+        var putFailure = local; putFailure.clientTripID = UUID(); permittedIDs.insert(putFailure.clientTripID!)
+        failVehicle = true
+        await reread.upload(trip: putFailure)
+        let beforePost = reread.uploadDiagnostics(for: putFailure)
+        try check(beforePost.trace?.stage == .vehicle && beforePost.trace?.postAttemptedAt == nil && posts == 1, "vehicle HTTP failure is not mislabeled as attempted POST")
+        failVehicle = false; failPost = true
+        await reread.upload(trip: putFailure)
+        let attempted = reread.uploadDiagnostics(for: putFailure)
+        try check(attempted.state == .attempted && attempted.serverTripID == nil && attempted.trace?.postAttemptCount == 1, "network failure at POST cannot claim server acceptance")
+        failPost = false; failReceipt = true
+        await reread.upload(trip: putFailure)
+        let accepted = reread.uploadDiagnostics(for: putFailure)
+        try check(accepted.state == .accepted && accepted.serverTripID == serverTrip && accepted.trace?.stage == .receipt, "accepted POST with interrupted receipt is pending, not unscored")
+        failReceipt = false; scoreReceipt = true
+        let postsBeforeReceipt = posts
+        await reread.upload(trip: putFailure)
+        try check(reread.uploadDiagnostics(for: putFailure).state == .scored && posts == postsBeforeReceipt, "successful receipt retrieval transitions to scored without another POST")
+        let foreignStore = MemoryCredentialStore()
+        try foreignStore.save(.init(userID: UUID(), nickname: "Other", token: "other-offline-token", isDemoAccount: false))
+        let foreignClient = BackendAPIClient(mode: .remote(URL(string: "https://integration.invalid")!), session: URLSession(configuration: config), credentialStore: foreignStore)
+        let foreign = BackendViewModel(storageURL: file)
+        await foreign.connect(remote: true, baseURL: "https://integration.invalid", client: foreignClient)
+        let scoped = foreign.uploadDiagnostics(for: putFailure)
+        try check(scoped.trace == nil && scoped.serverTripID == nil && scoped.state == .notEligible, "different account cannot read cached transport or receipt status")
+        // Decode the old cache schema without inventing historical attempt evidence.
+        var oldState = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        oldState.removeValue(forKey: "uploadTraces")
+        try JSONSerialization.data(withJSONObject: oldState).write(to: file)
+        let oldVM = BackendViewModel(storageURL: file)
+        await oldVM.connect(remote: true, baseURL: "https://integration.invalid", client: client)
+        try check(oldVM.uploadDiagnostics(for: local).state == .notScored && oldVM.uploadDiagnostics(for: local).trace == nil, "old accepted uploads decode with known acceptance and unknown attempt dates")
         print("\(checks) league view-model integration checks passed")
     }
 }

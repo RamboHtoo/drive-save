@@ -93,12 +93,23 @@ struct TripUploadSection: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Surface {
-            if backend.unsupportedReason(for: trip) != nil {
-                Text(backend.insufficientReason(for: trip) != nil ? "Insufficient recording data" : "Use the account and vehicle selected when this recording began. Older recordings remain available for inspection.").font(.subheadline).foregroundStyle(DS.secondary)
+            let diagnostics = backend.uploadDiagnostics(for: trip)
+            if diagnostics.serverTripID != nil {
+                if diagnostics.state == .notScored {
+                    Text("The server received this trip but could not produce an estimate.").font(.subheadline).foregroundStyle(DS.secondary)
+                }
+                Button("Refresh receipt") { Task { await backend.upload(trip: trip) } }
+                    .buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
+            } else if diagnostics.preflightFailure != nil {
+                Text("This recording stays on this iPhone. View the reason in Developer Mode → Recording diagnostics.")
+                    .font(.subheadline).foregroundStyle(DS.secondary)
             } else {
-                Button("Get estimate") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
+                Text(backend.isRemote ? "Saved locally. Get an estimate to upload this trip." : "Offline demo. No trip will be sent to the backend.")
+                    .font(.subheadline).foregroundStyle(DS.secondary)
+                Button(diagnostics.trace?.postAttemptedAt == nil ? "Get estimate" : "Retry estimate") { Task { await backend.upload(trip: trip) } }
+                    .buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             }
-            if backend.insufficientReason(for: trip) == nil { ConsumerBackendStatusView() }
+            ConsumerBackendStatusView()
         }
     }
 }

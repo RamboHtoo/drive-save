@@ -19,6 +19,7 @@ private struct BackendLocalState: Codable {
     var leagueByUser: [String: UUID] = [:]
     var uploads: [String: SavedUpload] = [:]
     var replay: APITripPayload?
+    var uploadTraces: [String: TripUploadTrace]? = nil
 }
 
 @MainActor
@@ -33,6 +34,7 @@ final class BackendViewModel: ObservableObject {
     @Published private(set) var league: APILeague?
     @Published private(set) var standings: [APIStanding] = []
     @Published private(set) var leaderboardIsDemo = false
+    @Published private(set) var leaderboardMetric: String?
     @Published private(set) var notice: String?
     @Published private(set) var consumerErrorMessage: String?
     @Published var errorMessage: String?
@@ -272,21 +274,57 @@ final class BackendViewModel: ObservableObject {
         }
         return context
     }
+    private func prepareUpload(_ trip: Trip) throws -> (APITripPayload, RecordingContext?) {
+        // Use exactly the same order for UI diagnostics and the real upload gate.
+        let context = trip.source == .measured ? try validateRecordingContext(trip) : nil
+        if let reason = TripUploadBuilder.scoringIssue(for: trip) { throw BackendError.invalidInput(reason) }
+        return (try TripUploadBuilder.payload(for: trip), context)
+    }
     func unsupportedReason(for trip: Trip) -> String? {
-        do {
-            if trip.source == .measured { _ = try validateRecordingContext(trip) }
-            if let reason = TripUploadBuilder.scoringIssue(for: trip) { return reason }
-            _ = try TripUploadBuilder.payload(for: trip)
-            return nil
-        } catch { return error.localizedDescription }
+        do { _ = try prepareUpload(trip); return nil }
+        catch { return error.localizedDescription }
+    }
+    private func traceKey(for trip: Trip) -> String? {
+        identity.map { key(trip.clientTripID ?? trip.id) + ":" + $0.userID.uuidString }
+    }
+    private func updateTrace(_ traceKey: String?, stage: TripUploadTrace.Stage? = nil, post: Bool = false, failure: Error? = nil) throws {
+        guard let traceKey, var trace = state.uploadTraces?[traceKey] else { return }
+        if let stage { trace.stage = stage }
+        if post { trace.postAttemptedAt = Date(); trace.postAttemptCount += 1 }
+        if let failure {
+            if case BackendError.server(let status, let body) = failure {
+                trace.lastError = "HTTP \(status) [\(body?.code ?? "unknown")]: \(failure.localizedDescription)"
+            } else { trace.lastError = failure.localizedDescription }
+        }
+        state.uploadTraces?[traceKey] = trace
+        try persist()
+    }
+    func uploadDiagnostics(for trip: Trip) -> RecordingUploadDiagnostics {
+        _ = revision
+        let cached = trip.clientTripID.flatMap { state.uploads[key($0)] }
+        let record = cached.flatMap { $0.mock == !isRemote && ($0.payload.is_demo || $0.owner == identity?.userID) ? $0 : nil }
+        let trace = traceKey(for: trip).flatMap { state.uploadTraces?[$0] }
+        return RecordingUploadDiagnostics(preflightFailure: unsupportedReason(for: trip), trace: trace,
+            serverTripID: record?.serverTripID, hasReceipt: record?.receipt != nil,
+            serverReason: record?.insufficientReason, legacyAttemptUnknown: record != nil && trace == nil && record?.serverTripID == nil, isRemote: isRemote)
     }
     func upload(trip: Trip) async {
         await run {
-            // Verify the start identity before building, persisting, PUT, POST, or receipt access.
-            let context = trip.source == .measured ? try validateRecordingContext(trip) : nil
-            let payload = try TripUploadBuilder.payload(for: trip)
-            if let reason = TripUploadBuilder.scoringIssue(for: trip) { throw BackendError.invalidInput(reason) }
-            try await submit(payload, recordingContext: context)
+            let traceKey = traceKey(for: trip)
+            if let traceKey {
+                var trace = state.uploadTraces?[traceKey] ?? TripUploadTrace(requestedAt: Date())
+                trace.stage = .preflight; trace.lastError = nil
+                if state.uploadTraces == nil { state.uploadTraces = [:] }
+                state.uploadTraces?[traceKey] = trace
+            }
+            do {
+                if traceKey != nil { try persist() }
+                let (payload, context) = try prepareUpload(trip)
+                try await submit(payload, recordingContext: context, traceKey: traceKey)
+            } catch {
+                try? updateTrace(traceKey, failure: error)
+                throw error
+            }
         }
         await refreshProgress()
     }
@@ -300,7 +338,7 @@ final class BackendViewModel: ObservableObject {
             try await submit(state.replay!)
         }
     }
-    private func submit(_ payload: APITripPayload, recordingContext: RecordingContext? = nil) async throws {
+    private func submit(_ payload: APITripPayload, recordingContext: RecordingContext? = nil, traceKey: String? = nil) async throws {
         guard let identity else { throw BackendError.invalidInput("Complete welcome registration first.") }
         if !payload.is_demo {
             guard let recordingContext else { throw BackendError.invalidInput("Missing recording-start identity.") }
@@ -328,28 +366,71 @@ final class BackendViewModel: ObservableObject {
         }
         let expectedOwner = payload.is_demo ? nil : recordingContext?.ownerID
         if record.serverTripID == nil {
-            let result = try await uploadAPI.upload(record.payload, vehicle: record.vehicle, expectedOwnerID: expectedOwner)
+            try updateTrace(traceKey, stage: .vehicle)
+            let result = try await uploadAPI.upload(record.payload, vehicle: record.vehicle, expectedOwnerID: expectedOwner, willPost: {
+                try await self.updateTrace(traceKey, stage: .post, post: true)
+            })
             record.serverTripID = result.trip_id
             record.owner = try await uploadAPI.identity()?.userID ?? identity.userID
             if let expectedOwner, record.owner != expectedOwner { throw BackendError.expiredSession }
             state.uploads[uploadKey] = record; try persist()
             notice = result.duplicate ? "Duplicate upload recognized (200). Fetching the original receipt." : "Trip accepted (201). Fetching receipt."
         }
+        try updateTrace(traceKey, stage: .receipt)
         do {
             record.receipt = try await uploadAPI.receipt(tripID: record.serverTripID!, expectedOwnerID: expectedOwner)
             record.insufficientReason = nil
         } catch BackendError.server(let status, let body) where body?.code == "trip_not_scored" {
-            record.insufficientReason = BackendError.server(status, body).localizedDescription
+            let refusal = BackendError.server(status, body)
+            record.insufficientReason = "HTTP \(status) [\(body?.code ?? "unknown")]: \(refusal.localizedDescription)"
+            try updateTrace(traceKey, failure: refusal)
             state.uploads[uploadKey] = record; try persist()
             // Normal screens use a concise state; the exact response remains in Developer Mode.
             notice = "Insufficient recording data"
             return
         }
         state.uploads[uploadKey] = record; try persist()
+        try updateTrace(traceKey, stage: .complete)
         if !isRemote { notice = "Offline mock receipt. No trip was sent to the server." }
         else if payload.is_demo { notice = "Demo replay uploaded under an isolated account that cannot join leagues in this app. Your driver account's rankings are unaffected." }
         if let reset = await uploadAPI.takeResetNotice() { notice = reset; recoveryMessage = reset }
     }
+    /// Uses existing authenticated self-scoped leaderboard + private crew APIs.
+    /// No token, join code, vehicle or trip is exported, and no account is created.
+    func authenticatedLeagueSetup() async throws -> String {
+        guard let owner = identity, isRemote else { throw BackendError.invalidInput("Use the existing online Htoo account to verify its league.") }
+        let board = try await api.currentLeaderboard(expectedOwnerID: owner.userID) // Server resolves the authenticated caller's league.
+        let current = try await api.league(id: board.crew_id, expectedOwnerID: owner.userID)
+        guard identity == owner, current.members.contains(where: { $0.user_id == owner.userID && $0.nickname == owner.nickname }) else { throw BackendError.invalidResponse }
+        return String(decoding: try APIJSON.encoder().encode([
+            "owner_id": owner.userID.uuidString, "owner_nickname": owner.nickname,
+            "league_id": current.crew_id.uuidString, "league_name": current.name,
+            "verified_at": Date().ISO8601Format(), "verification": "authenticated self leaderboard and private league membership"
+        ]), as: UTF8.self)
+    }
+    func fetchLeagueShowcase() async throws -> APILeaderboard {
+        guard let owner = identity, let league else { throw BackendError.invalidInput("Sign in and refresh your existing league first.") }
+        let result: APILeaderboard
+        if isRemote {
+            result = try await api.leagueShowcase()
+        } else {
+            // Explicit offline fixture only; never used as fallback for a remote error.
+            let fixture = try BackendFixtures.load("league-showcase", as: APILeaderboard.self)
+            var json = try JSONSerialization.jsonObject(with: APIJSON.encoder().encode(fixture)) as! [String: Any]
+            json["crew_id"] = league.crew_id.uuidString; json["crew_name"] = league.name; json["viewer_id"] = owner.userID.uuidString
+            var rows = json["standings"] as! [[String: Any]]
+            if let index = rows.firstIndex(where: { ($0["is_synthetic_demo"] as? Bool) == false }) {
+                rows[index]["user_id"] = owner.userID.uuidString; rows[index]["nickname"] = owner.nickname
+            }
+            json["standings"] = rows
+            result = try APIJSON.decoder().decode(APILeaderboard.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        guard identity == owner, result.crew_id == league.crew_id,
+              result.ranking_metric == "weekly_avoidable_cost_usd", result.demo_preview == true,
+              result.standings.contains(where: { $0.user_id == owner.userID }) else { throw BackendError.invalidResponse }
+        return result
+    }
+
     func createLeague(name: String) async {
         var createdSuccessfully = false
         await run {
@@ -390,10 +471,10 @@ final class BackendViewModel: ObservableObject {
             }
             league = loaded
             if loaded.canRank {
-                let board = try await api.leaderboard(id: id)
+                let board = try await api.costLeaderboard()
                 guard board.crew_id == id else { throw BackendError.invalidResponse }
                 var verified = loaded; verified.active = board.active; verified.member_count = board.member_count
-                league = verified; leaderboardIsDemo = board.is_demo
+                league = verified; leaderboardIsDemo = board.is_demo; leaderboardMetric = board.ranking_metric
                 standings = verified.canRank ? board.standings : []
             } else { standings = [] }
         }

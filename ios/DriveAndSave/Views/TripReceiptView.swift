@@ -7,6 +7,8 @@ struct TripReceiptView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDeletion = false
     @State private var deletionFailed = false
+    @AppStorage("developerMode") private var developerMode = false
+    private var uploadDiagnostics: RecordingUploadDiagnostics { backend.uploadDiagnostics(for: trip) }
     var body: some View {
         Screen {
             if trip.source == .measured && !trip.isWalkingTest { Eyebrow(text: "Recorded drive") }
@@ -16,13 +18,17 @@ struct TripReceiptView: View {
                 DisplayType(trip.displayTitle, size: 40).accessibilityAddTraits(.isHeader)
                 Text(trip.date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(DS.secondary)
             }
+            if trip.recording != nil && !trip.isWalkingTest {
+                Text(uploadDiagnostics.state.rawValue).font(.headline).foregroundStyle(DS.secondary)
+                    .accessibilityIdentifier("tripUploadState")
+            }
             if let receipt = backend.receipt(for: trip) {
                 BackendReceiptCard(receipt: receipt, mock: !backend.isRemote, showDetailsLink: false)
             } else {
                 ReceiptPaper {
                     Text("Estimated fuel impact").font(.headline)
                     if trip.hasEstimate { FinancialNumber(value: trip.avoidableCost.dollars, ink: DS.background) }
-                    else { Text(trip.isWalkingTest ? "No fuel estimate" : trip.isIncompleteRecording ? "Incomplete recording" : backend.insufficientReason(for: trip) != nil ? "Insufficient recording data" : "Estimate pending").font(.largeTitle.bold()).fontWidth(.condensed).accessibilityIdentifier("receiptEstimateState") }
+                    else { Text(trip.isWalkingTest ? "No fuel estimate" : trip.isIncompleteRecording ? "Incomplete recording" : trip.recording != nil ? uploadDiagnostics.state.rawValue : "Estimate pending").font(.largeTitle.bold()).fontWidth(.condensed).accessibilityIdentifier("receiptEstimateState") }
                     Text("Vehicle recorded: \(trip.recordingContext?.vehicle?.vehicleTitle ?? "Not recorded")").font(.subheadline)
                 }
                 if trip.hasEstimate {
@@ -48,6 +54,10 @@ struct TripReceiptView: View {
                 if trip.recording?.distanceIsPartial == true { Text("Partial GPS distance · gaps excluded").font(.caption).foregroundStyle(DS.secondary) }
             }
             if !trip.isWalkingTest && backend.receipt(for: trip) == nil { TripUploadSection(trip: trip) }
+            if developerMode && trip.recording != nil {
+                NavigationLink("Recording diagnostics") { TripReceiptAdvancedView(trip: trip) }
+                    .accessibilityIdentifier("recordingDiagnostics")
+            }
             if model.isLocalTrip(trip) {
                 Button("Delete local recording", role: .destructive) { confirmingDeletion = true }
                     .accessibilityIdentifier("deleteLocalTrip")
@@ -73,6 +83,7 @@ struct TripReceiptAdvancedView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Screen {
+            RecordingDiagnosticSummary(trip: trip)
             TripTimeline(trip: trip)
             Surface {
                 Eyebrow(text: "Recording details")
@@ -125,5 +136,23 @@ struct TripReceiptAdvancedView: View {
                 Text("Contract payload · no coordinates or monetary inputs.").font(.caption).foregroundStyle(DS.secondary)
             }
         }.navigationTitle("Advanced Settings").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Only hosted by Developer Mode routes. No sensor values or eligibility flags are changed here.
+struct RecordingDiagnosticSummary: View {
+    let trip: Trip
+    @EnvironmentObject private var backend: BackendViewModel
+    var body: some View {
+        let diagnostics = backend.uploadDiagnostics(for: trip)
+        let summary = diagnostics.summary(for: trip)
+        Surface {
+            Eyebrow(text: "Upload diagnostics")
+            Text(summary).font(.caption.monospaced()).textSelection(.enabled)
+                .accessibilityIdentifier("recordingUploadSummary")
+            ShareLink(item: summary, subject: Text("Drive Save recording diagnostics")) {
+                Label("Share diagnostic summary", systemImage: "square.and.arrow.up")
+            }.accessibilityIdentifier("shareRecordingDiagnostics")
+        }
     }
 }

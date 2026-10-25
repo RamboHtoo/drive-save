@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 recording_build_dir=$(mktemp -d /tmp/drivesave-recording-tests.XXXXXX)
 models=DriveAndSave/Models
 services=DriveAndSave/Services
-common=("$models/DrivingModels.swift" "$models/RecordingModels.swift" "$models/BackendModels.swift")
+common=("$models/DrivingModels.swift" "$models/RecordingModels.swift" "$models/BackendModels.swift" "$models/RecordingUploadDiagnostics.swift")
 api=("$services/TripUploadBuilder.swift" "$services/KeychainCredentialStore.swift" "$services/BackendAPIClient.swift")
 run_suite() {
     local name=$1
@@ -20,6 +20,7 @@ run_suite vehicles "${common[@]}" "$models/VehicleCatalogModels.swift" "${api[@]
 run_suite calculation "${common[@]}" "$models/VehicleCatalogModels.swift" "$models/TestCalculationModels.swift" "${api[@]}" "$services/TestCalculationService.swift" DriveAndSave/ViewModels/TestCalculationViewModel.swift Tests/TestCalculationTests.swift
 run_suite history "${common[@]}" "$models/TripExportPayload.swift" "$services/TripStore.swift" "$services/APIClient.swift" DriveAndSave/MockData/DemoData.swift DriveAndSave/ViewModels/AppViewModel.swift Tests/TripHistoryTests.swift
 run_suite leagues "${common[@]}" "$models/VehicleCatalogModels.swift" "$models/TestCalculationModels.swift" "${api[@]}" "$services/TestCalculationService.swift" DriveAndSave/ViewModels/BackendViewModel.swift Tests/LeagueIntegrationTests.swift
+run_suite diagnostics "${common[@]}" Tests/RecordingUploadDiagnosticsTests.swift
 run_suite recording "${common[@]}" "$services/TripUploadBuilder.swift" Tests/RecordingContractTests.swift
 run_suite v2 "${common[@]}" Tests/V2IntegrationTests.swift
 run_suite telemetry "${common[@]}" "$models/LiveTelemetry.swift" Tests/LiveTelemetryTests.swift

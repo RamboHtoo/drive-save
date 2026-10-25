@@ -42,7 +42,7 @@ if args.recording:
 else:
     full, result = evaluate(args.payloads / "complete-fixture.json")
     assert full["source"] == "replayed" and full["is_demo"] is True
-    assert full["events_complete"] is True and full["detector_version"] == "ios-0.3.0"
+    assert full["events_complete"] is True and full["detector_version"] == "ios-0.3.1"
     assert result.status == "scored" and result.avoidable_usd is not None
     for name in ["boundary-gap-fixture", "recorded-mode-fixture", "asynchronous-fixture", "three-second-edges-fixture"]:
         raw, result = evaluate(args.payloads / (name + ".json"))

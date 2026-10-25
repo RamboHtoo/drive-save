@@ -146,3 +146,8 @@ See [ConsumerCleanup.md](Docs/ConsumerCleanup.md) for the full hidden/relocated 
 ### Local recording cleanup
 
 The obsolete Contract Demo Replay control has been removed; **Test Calculation** remains the primary developer demo. Internal replay/API testing helpers remain intact. History labels recordings without usable distance **Incomplete recording**. Open a local recording to inspect it or choose **Delete local recording** and confirm **Delete from this iPhone**. This deletes only the saved local copy, with no API call, server deletion, or league ranking change. Missing mileage and prices remain unavailable. Details and regression commands are in [ConsumerCleanup.md](Docs/ConsumerCleanup.md).
+
+
+[Physical recording upload investigation](Docs/RecordingUploadInvestigation.md) traces local Save through explicit Get estimate, documents the inspected iPhone recordings' exact blockers, and describes developer-only transport/sensor diagnostics and the GPS/Core Motion callback-ordering fix. Saving to History does not itself upload a trip.
+
+[Existing-league demo preparation](DeveloperTools/league_demo/README.md) provides an authenticated read-only inspector, idempotent five-player seed/cleanup proposal, isolated database evidence and explicitly labeled iOS showcase. Production requires reviewed backend integration and explicit approval; no real league was seeded during preparation.
