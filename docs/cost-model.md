@@ -83,7 +83,7 @@ The US average retail price of the car's fuel, from the EIA weekly series: `{"ke
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `model_name` | string | Model version, `notion-mazda5-2012-auto-v1`; shown on the receipt as `cost_model` |
+| `model_name` | string | Model version, `vehicle-fuel-v1`; shown on the receipt as `cost_model` |
 | `status` | string | `scored` or `insufficient_data` |
 | `event_costs_usd` | list | One per input event, in the same order; null when the trip isn't priced |
 | `fuel_gal` | number or null | The trip's fuel budget from label MPG, not measured fuel |

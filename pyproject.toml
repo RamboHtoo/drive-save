@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "drive-save-model"
 version = "0.2.0"
-description = "Experimental single-car Mazda5 fuel estimates based on driving events"
+description = "Experimental vehicle-specific fuel estimates based on driving events"
 requires-python = ">=3.12,<3.13"
 dependencies = ["numpy==2.5.4"]
 

@@ -129,7 +129,7 @@ Trips are priced by the data teammate's fuel model ([`docs/cost-model.md`](cost-
 - `events[].cost_usd`: what each event cost. Braking and acceleration have a cost; sharp turns are coaching only and cost $0.
 - `high_speed_cost_usd`: the cost of driving above 65 mph, which isn't tied to an event.
 - `avoidable_cost_usd`: the trip's total: the event costs plus `high_speed_cost_usd`.
-- `cost_model`: which model produced the amounts, `notion-mazda5-2012-auto-v1`.
+- `cost_model`: which model produced the amounts, `vehicle-fuel-v1`.
 - `assumptions[]`: every numeric constant with its `source_url` and `as_of` date, including the fuel price (`gas_price`, or `diesel_price` for a diesel car). For a car from the vehicle list, the car's own parameters (`marginal_wheel_efficiency`, `idle_rate` and so on) have EPA's Test Car List as their source. `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
 - `notes[]`: the assumptions that aren't numbers, such as `road_conditions: level, no wind, warm engine`.
 - A trip the model couldn't price returns `409` with `trip_not_scored`; `message` names the reason, for example `event_recording_incomplete`.

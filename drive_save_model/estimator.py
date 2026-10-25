@@ -1,4 +1,4 @@
-"""Offline Mazda5 scenario estimates. Backend supplies trusted configuration.
+"""Offline vehicle-specific fuel scenario estimates. Backend supplies trusted configuration.
 
 Another car can be priced with the same equations when the backend supplies its
 profile with all of its own parameters (physics.DEFAULT_PARAMETERS keys).
@@ -14,7 +14,7 @@ from .physics import (DATA, DEFAULT_PARAMETERS, G, MPH_TO_MPS, LBF_TO_N,
                       brake_scenario, acceleration_scenario, high_speed_scenario, parameters)
 from .trace import TraceError, finite_number, prepare_trace, timestamp
 
-MODEL_VERSION = "notion-mazda5-2012-auto-v1"
+MODEL_VERSION = "vehicle-fuel-v1"
 PROFILE_ID = "mazda5-2012-auto-31284-epa-config1"
 NOTION_SOURCE = "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a"
 

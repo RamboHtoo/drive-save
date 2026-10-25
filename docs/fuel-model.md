@@ -96,8 +96,9 @@ Only the unchanged `reference_profile()` can omit `parameters`.
 Pass the same profile to `scoring_config(..., vehicle_profile=profile)` and
 `estimate_trip(...)`. The configuration records that car's assumptions and its
 identity includes the profile, parameters and fuel price. A changed profile with
-an old configuration produces `scoring_config_mismatch`. Mazda5 reference results
-and configuration remain unchanged.
+an old configuration produces `scoring_config_mismatch`. The Mazda5 reference
+calculations remain unchanged. The version rename changes configuration IDs, including the reference car's; existing stored receipts keep
+their original version and configuration, while new trips start a new baseline.
 
 For `fuel_type="diesel"`, supply the diesel price; the receipt assumption is
 `diesel_price` instead of `gas_price`. The library does not fetch prices or convert
@@ -177,7 +178,7 @@ labels must remain truthful even when `is_demo=true`.
 
 ## Calculations and interpretation
 
-The model version remains `notion-mazda5-2012-auto-v1` for all supported vehicles;
+The model version is `vehicle-fuel-v1` for all supported vehicles;
 the configuration identifies the specific vehicle and assumptions. In the formulas
 below, η is `marginal_wheel_efficiency`, E is `fuel_energy` in J/gal, and q is
 `idle_rate` in gal/hour from that vehicle's parameters:

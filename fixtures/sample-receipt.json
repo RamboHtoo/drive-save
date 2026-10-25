@@ -26,7 +26,7 @@
   ],
   "avoidable_cost_usd": 0.1182,
   "high_speed_cost_usd": 0.1026,
-  "cost_model": "notion-mazda5-2012-auto-v1",
+  "cost_model": "vehicle-fuel-v1",
   "vehicle": "2012 Mazda5 2.5L automatic (5-speed), FWD",
   "label": "Estimated fuel savings; accuracy not yet validated",
   "assumptions": [

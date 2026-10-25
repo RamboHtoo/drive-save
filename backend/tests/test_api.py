@@ -126,7 +126,7 @@ def test_upload_sample_trip_and_read_receipt(client):
 
     receipt = client.get(created["receipt_url"], headers=headers).json()
     assert receipt["trip_id"] == created["trip_id"]
-    assert (receipt["cost_model"], receipt["is_estimate"], receipt["is_demo"]) == ("notion-mazda5-2012-auto-v1", True, True)
+    assert (receipt["cost_model"], receipt["is_estimate"], receipt["is_demo"]) == ("vehicle-fuel-v1", True, True)
     assert receipt["label"] == "Estimated fuel savings; accuracy not yet validated"
     # The Mazda5 model prices braking and acceleration; sharp turns are coaching only. Time above 65 mph adds to the total.
     brake, accel, turn = (e["cost_usd"] for e in receipt["events"])

@@ -1,4 +1,4 @@
-"""Experimental Mazda5 math model. Not measured fuel consumption."""
+"""Experimental vehicle-specific fuel model. Not measured fuel consumption."""
 
 from .estimator import estimate_trip, reference_profile, scoring_config
 
