@@ -3,6 +3,7 @@
 **
 !backend/
 !analytics/
+!drive_save_model/
 backend/.venv/
 backend/.env
 **/__pycache__/

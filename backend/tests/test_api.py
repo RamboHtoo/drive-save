@@ -48,10 +48,14 @@ def new_user(client, nickname="alex"):
     return body["user_id"], {"Authorization": f"Bearer {body['token']}"}
 
 
+def parse(ts):
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
 def fresh_trip(events=None):
     """The sample trip as a new trip that ended a minute ago (weekly standings only count this week).
 
-    New client_trip_id and event ids; optionally fewer events.
+    New client_trip_id and event ids; optionally only the first few events (brake, acceleration, turn).
     """
     trip = copy.deepcopy(SAMPLE_TRIP)
     trip["client_trip_id"] = str(uuid.uuid4())
@@ -59,9 +63,6 @@ def fresh_trip(events=None):
         event["event_id"] = str(uuid.uuid4())
     if events is not None:
         trip["events"] = trip["events"][:events]
-
-    def parse(ts):
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
     shift = datetime.now(timezone.utc) - timedelta(minutes=1) - parse(trip["ended_at"])
 
@@ -74,8 +75,26 @@ def fresh_trip(events=None):
     return trip
 
 
+def first_part(trip, seconds):
+    """The first `seconds` of a trip as a trip of its own, with the distance its readings add up to."""
+    start = parse(trip["started_at"])
+    trip["speed_samples"] = [s for s in trip["speed_samples"] if (parse(s["ts"]) - start).total_seconds() <= seconds]
+    trip["events"] = [e for e in trip["events"] if (parse(e["ts"]) - start).total_seconds() + e["duration_s"] <= seconds]
+    trip["ended_at"] = trip["speed_samples"][-1]["ts"]
+    valid = [((parse(s["ts"]) - start).total_seconds(), s["speed_mps"]) for s in trip["speed_samples"] if s["speed_mps"] >= 0]
+    meters = sum((t1 - t0) * (v0 + v1) / 2 for (t0, v0), (t1, v1) in zip(valid, valid[1:]))
+    trip["distance_mi"] = round(meters / 1609.344, 4)
+    trip["avg_speed_mph"] = round(trip["distance_mi"] / (seconds / 3600), 1)
+    return trip
+
+
 def upload(client, headers, trip=None):
     return client.post("/trips", json=trip or SAMPLE_TRIP, headers=headers)
+
+
+def trip_total(trip_id):
+    """The model's unrounded avoidable cost for a stored trip."""
+    return float(query("SELECT avoidable_usd FROM trips WHERE id = $1", uuid.UUID(trip_id))[0]["avoidable_usd"])
 
 
 def test_health_reports_the_database(client):
@@ -107,24 +126,62 @@ def test_upload_sample_trip_and_read_receipt(client):
 
     receipt = client.get(created["receipt_url"], headers=headers).json()
     assert receipt["trip_id"] == created["trip_id"]
-    assert receipt["is_estimate"] is True
-    assert receipt["cost_model"] == "flat_per_event"
-    # Placeholder pricing: every harsh event costs $1.
-    assert [e["cost_usd"] for e in receipt["events"]] == [1.0] * len(SAMPLE_TRIP["events"])
-    assert receipt["avoidable_cost_usd"] == len(SAMPLE_TRIP["events"])
-    per_event = next(a for a in receipt["assumptions"] if a["key"] == "cost_per_event")
-    assert per_event["value"] == 1.0
-    assert per_event["is_estimate"] is True
+    assert (receipt["cost_model"], receipt["is_estimate"], receipt["is_demo"]) == ("notion-mazda5-2012-auto-v1", True, True)
+    assert receipt["label"] == "Estimated fuel savings; accuracy not yet validated"
+    # The Mazda5 model prices braking and acceleration; sharp turns are coaching only. Time above 65 mph adds to the total.
+    brake, accel, turn = (e["cost_usd"] for e in receipt["events"])
+    assert brake > 0 and accel > 0 and turn == 0
+    assert receipt["high_speed_cost_usd"] > 0
+    assert receipt["avoidable_cost_usd"] == pytest.approx(brake + accel + turn + receipt["high_speed_cost_usd"], abs=2e-4)
+    price = next(a for a in receipt["assumptions"] if a["key"] == "gas_price")
+    assert (price["value"], price["source_url"]) == (4.284, cost_model.US_AVERAGE_FUEL_PRICE.source_url)
+    assert any(note.startswith("road_conditions: ") for note in receipt["notes"])
 
 
-def test_trip_without_events_costs_nothing(client):
+def test_trip_without_events_only_pays_for_time_above_65_mph(client):
     _, headers = new_user(client)
-    trip = copy.deepcopy(SAMPLE_TRIP)
-    trip["events"] = []
-    trip_id = upload(client, headers, trip).json()["trip_id"]
+    trip_id = upload(client, headers, fresh_trip(events=0)).json()["trip_id"]
     receipt = client.get(f"/trips/{trip_id}/receipt", headers=headers).json()
     assert receipt["events"] == []
-    assert receipt["avoidable_cost_usd"] == 0
+    assert receipt["avoidable_cost_usd"] == receipt["high_speed_cost_usd"] > 0
+
+
+@pytest.mark.parametrize(
+    "change, reason",
+    [
+        pytest.param(lambda t: t.update(events_complete=False), "event_recording_incomplete", id="detector-stopped"),
+        pytest.param(lambda t: t.pop("detector_version"), "missing_detector_version", id="no-trip-detector-version"),
+        pytest.param(lambda t: t.update(speed_samples=t["speed_samples"][:150]), "missing_boundary_speed", id="readings-stop-early"),
+        pytest.param(lambda t: [e.pop("duration_s") for e in t["events"]], "invalid_event_duration", id="no-event-duration"),
+    ],
+)
+def test_trip_the_model_cannot_price_is_kept_without_a_receipt(client, change, reason):
+    user_id, headers = new_user(client)
+    trip = fresh_trip()
+    change(trip)
+    res = upload(client, headers, trip)
+    assert res.status_code == 201
+    receipt = client.get(res.json()["receipt_url"], headers=headers)
+    assert receipt.status_code == 409
+    assert receipt.json()["error"]["code"] == "trip_not_scored"
+    assert reason in receipt.json()["error"]["message"]
+    row = query("SELECT status, quality_flags, fuel_gal FROM trips WHERE user_id = $1", uuid.UUID(user_id))[0]
+    assert (row["status"], json.loads(row["quality_flags"]), row["fuel_gal"]) == ("insufficient_data", [reason], None)
+    assert query("SELECT count(*) AS n FROM trip_metrics")[0]["n"] == 0
+
+
+def test_everything_is_demo_data_while_the_model_is_experimental(client):
+    _, headers = new_user(client)
+    crew = client.post("/crews", json={"name": "Roommates"}, headers=headers).json()
+    assert crew["is_demo"] is True
+    trip = fresh_trip()
+    assert trip["is_demo"] is False  # what the app sends for a real drive
+    created = upload(client, headers, trip).json()
+    row = query("SELECT is_demo, source FROM trips WHERE id = $1", uuid.UUID(created["trip_id"]))[0]
+    assert (row["is_demo"], row["source"]) == (True, "recorded")
+    assert client.get(created["receipt_url"], headers=headers).json()["is_demo"] is True
+    assert upload(client, headers, trip).json()["duplicate"] is True  # a retry still matches the stored trip
+    assert client.get("/leaderboard", headers=headers).json()["is_demo"] is True
 
 
 def test_retried_upload_returns_same_trip(client):
@@ -187,24 +244,29 @@ def test_leaderboard_ranks_members_inside_the_callers_crew(client):
         client.post(f"/crews/{crew['crew_id']}/join", json={"join_code": crew["join_code"]}, headers=headers)
         members[name] = headers
 
-    # Alex and Blake drive a 3-trip baseline (3 events each) and then a smoother trip; Blake's is smoother.
+    # Alex and Blake drive a 3-trip baseline of the full sample trip, then the same route reporting fewer events:
+    # Blake only the brake, Alex the brake and the acceleration. Turns cost nothing in this model.
+    later = {}
     for name, later_events in [("alex", 2), ("blake", 1)]:
         for _ in range(3):
-            upload(client, members[name], fresh_trip())
-        upload(client, members[name], fresh_trip(events=later_events))
+            full = upload(client, members[name], fresh_trip()).json()["trip_id"]
+        later[name] = upload(client, members[name], fresh_trip(events=later_events)).json()["trip_id"]
+    # Same distance every time, so improvement is the share of the full trip's cost a later trip avoided.
+    saved = {name: trip_total(full) - trip_total(trip_id) for name, trip_id in later.items()}
+    assert saved["blake"] > 0 and saved["alex"] == pytest.approx(0, abs=1e-6)
 
     board = client.get("/leaderboard", headers=members["drew"]).json()
     assert (board["crew_name"], board["member_count"], board["active"]) == ("Roommates", 4, True)
     assert [(s["nickname"], s["rank"], s["improvement_pct"]) for s in board["standings"]] == [
-        ("blake", 1, 66.7),
-        ("alex", 2, 33.3),
+        ("blake", 1, round(100 * saved["blake"] / trip_total(full), 1)),
+        ("alex", 2, 0.0),
         ("casey", None, None),  # no baseline yet: listed last, unranked
         ("drew", None, None),
     ]
     # The iOS app decodes est_savings_usd as a number, so unranked drivers get 0 rather than null.
     assert [(s["state"], s["est_savings_usd"], s["trips_counted"]) for s in board["standings"]] == [
-        ("ready", 2.0, 1),
-        ("ready", 1.0, 1),
+        ("ready", round(saved["blake"], 4), 1),
+        ("ready", 0.0, 1),
         ("collecting_baseline", 0.0, 0),
         ("collecting_baseline", 0.0, 0),
     ]
@@ -224,35 +286,42 @@ def test_leaderboard_needs_a_crew_and_turns_active_at_four(client):
 def test_progress_sets_baseline_after_three_trips(client):
     user_id, headers = new_user(client)
     for _ in range(3):
-        upload(client, headers, fresh_trip())
+        full = upload(client, headers, fresh_trip()).json()["trip_id"]
     assert client.get(f"/users/{user_id}/progress", headers=headers).json()["improvement_pct"] is None  # no later trip yet
-    upload(client, headers, fresh_trip(events=1))  # a smoother fourth trip
+    smoother = upload(client, headers, fresh_trip(events=1)).json()["trip_id"]  # same route, only the brake
 
     progress = client.get(f"/users/{user_id}/progress", headers=headers).json()
     assert progress["trips_counted"] == 4
     assert progress["baseline_trips_needed"] == 0
-    # Baseline: 9 events over 19.2 mi. Fourth trip: 1 event over 6.4 mi, where the baseline rate predicts 3.
-    assert progress["improvement_pct"] == 66.7
-    assert progress["est_savings_usd"] == 2.0
-    assert progress["weekly"][-1]["miles"] == 25.6
+    saved = trip_total(full) - trip_total(smoother)
+    assert progress["improvement_pct"] == round(100 * saved / trip_total(full), 1)
+    assert progress["est_savings_usd"] == round(saved, 4)
+    assert progress["weekly"][-1]["miles"] == round(4 * SAMPLE_TRIP["distance_mi"], 1)
 
 
 def test_uploads_follow_the_database_rules(client):
     user_id, headers = new_user(client)
-    short = fresh_trip()
-    short["distance_mi"] = 0.5  # under a mile: priced, but never a baseline trip
+    short = first_part(fresh_trip(), seconds=100)  # under a mile: priced, but never a baseline trip
+    assert short["distance_mi"] < 1
     upload(client, headers, short)
     for _ in range(3):
         upload(client, headers, fresh_trip())
     upload(client, headers, fresh_trip(events=1))
 
-    trips = query("SELECT status, baseline_slot, distance_mi FROM trips WHERE user_id = $1 ORDER BY accepted_seq", uuid.UUID(user_id))
+    trips = query(
+        "SELECT id, status, baseline_slot, model_result->>'estimate_kind' AS kind FROM trips WHERE user_id = $1 ORDER BY accepted_seq",
+        uuid.UUID(user_id),
+    )
     assert [(t["status"], t["baseline_slot"]) for t in trips] == [("scored", None), ("scored", 1), ("scored", 2), ("scored", 3), ("scored", None)]
+    assert {t["kind"] for t in trips} == {"experimental_math_model"}  # the model's full result is kept with each trip
     assert query("SELECT count(*) AS n FROM trip_metrics WHERE user_id = $1", uuid.UUID(user_id))[0]["n"] == 5
-    assert query("SELECT count(*) AS n FROM speed_samples")[0]["n"] == 5 * len(SAMPLE_TRIP["speed_samples"])
+    assert query("SELECT count(*) AS n FROM speed_samples")[0]["n"] == 4 * len(SAMPLE_TRIP["speed_samples"]) + len(short["speed_samples"])
+    # One immutable configuration, under the id the model derives from its contents.
+    assert [str(r["id"]) for r in query("SELECT id FROM scoring_configs")] == [cost_model.SCORING_CONFIG["id"]]
     # Signed savings against the frozen baseline: the short trip came first, so only the last trip counts.
     ledger = query("SELECT amount_usd FROM savings_ledger WHERE user_id = $1", uuid.UUID(user_id))
-    assert [float(r["amount_usd"]) for r in ledger] == [2.0]
+    saved = trip_total(str(trips[1]["id"])) - trip_total(str(trips[4]["id"]))
+    assert [float(r["amount_usd"]) for r in ledger] == [pytest.approx(saved, abs=1e-6)]
 
 
 def test_trip_keeps_detector_coverage_and_its_league(client):
@@ -279,8 +348,9 @@ def test_data_survives_a_server_restart():
     with TestClient(app) as before:
         _, headers = new_user(before)
         trip_id = upload(before, headers).json()["trip_id"]
+        receipt = before.get(f"/trips/{trip_id}/receipt", headers=headers).json()
     with TestClient(app) as after:  # the app shut down and started again; same database
-        assert after.get(f"/trips/{trip_id}/receipt", headers=headers).json()["avoidable_cost_usd"] == 3.0
+        assert after.get(f"/trips/{trip_id}/receipt", headers=headers).json() == receipt
 
 
 def test_driver_sends_their_car_and_gets_it_back_unchanged(client):
@@ -308,25 +378,20 @@ def test_vehicle_data_must_be_a_reasonable_object(client, body):
     assert res.json()["error"]["code"] == "validation_error"
 
 
-def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_inputs):
+def test_cost_model_receives_every_trip_and_event_field(client, model_inputs):
     _, headers = new_user(client)
-    # Any fields the app sends, including ones the backend has never heard of, must reach the model untouched.
-    car = {**SAMPLE_VEHICLE, "trim": {"name": "Si", "tags": ["sport", "manual"]}, "is_hybrid": False, "notes": None}
-    client.put("/users/me/vehicle", json=car, headers=headers)
     trip_id = upload(client, headers).json()["trip_id"]
-    client.get(f"/trips/{trip_id}/receipt", headers=headers)
 
     inputs = model_inputs[-1]
-    # The car: exactly what the app sent, with the same types.
-    assert inputs.vehicle == car
-    assert type(inputs.vehicle["equivalent_test_weight_lb"]) is int
-    assert type(inputs.vehicle["target_coef_c_lbf_per_mph2"]) is float
+    # The car: the model's own Mazda5 profile, the only one it supports.
+    assert inputs.vehicle == cost_model.SCORING_CONFIG["vehicle_profile"]
+    assert inputs.vehicle["name"] == "2012 Mazda5 2.5L automatic (5-speed), FWD"
     # The trip.
     assert str(inputs.trip.trip_id) == trip_id
     assert inputs.trip.distance_mi == SAMPLE_TRIP["distance_mi"]
     assert inputs.trip.avg_speed_mph == SAMPLE_TRIP["avg_speed_mph"]
-    assert inputs.trip.duration_s == 18 * 60
-    assert (inputs.trip.events_complete, inputs.trip.detector_version) == (True, "ios-0.1.0")
+    assert inputs.trip.duration_s == 5 * 60
+    assert (inputs.trip.events_complete, inputs.trip.detector_version, inputs.trip.is_demo) == (True, "ios-0.1.0", True)
     # Every field the phone sent, for every event, in order.
     assert len(inputs.events) == len(SAMPLE_TRIP["events"])
     def as_sent(field, value):
@@ -344,15 +409,15 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_in
     brake, accel, turn = inputs.events
     assert brake.speed_change_mph == -22.0
     assert brake.mean_accel_g == pytest.approx(-22 * 0.44704 / 3.0 / 9.80665, abs=1e-4)
-    assert accel.speed_change_mph == 19.0
+    assert accel.speed_change_mph == 33.0
     assert accel.mean_accel_g > 0
     assert turn.avg_speed_mph == 21.0
     assert turn.heading_change_deg == 85.0
     # GPS speed readings: all of them for the trip, and 10 s before to 10 s after each event.
     assert len(inputs.trip.speed_samples) == len(SAMPLE_TRIP["speed_samples"])
-    assert [s.sample_seq for s in brake.speed_samples] == list(range(21))
-    assert [s.speed_mps for s in brake.speed_samples[9:14]] == [15.199, 15.199, 11.623, 8.494, 5.364]
-    invalid = next(s for s in accel.speed_samples if s.sample_seq == 41)
+    assert [s.sample_seq for s in brake.speed_samples] == list(range(20, 41))
+    assert [s.speed_mps for s in brake.speed_samples] == [s["speed_mps"] for s in SAMPLE_TRIP["speed_samples"][20:41]]
+    invalid = next(s for s in inputs.trip.speed_samples if s.sample_seq == 200)
     assert (invalid.speed_mps, invalid.speed_accuracy_mps) == (None, None)  # iOS sends -1 for an invalid reading
     assert all(e.speed_window_complete for e in inputs.events)
     # Fuel price: the US average.
@@ -367,6 +432,7 @@ def test_cost_model_receives_every_trip_event_and_vehicle_field(client, model_in
         pytest.param(lambda t: t["speed_samples"][1].update(sample_seq=0), id="duplicate-sample-seq"),
         pytest.param(lambda t: t["events"][1].update(event_id=t["events"][0]["event_id"]), id="duplicate-event-id"),
         pytest.param(lambda t: t["events"][0].pop("detector_version"), id="missing-detector-version"),
+        pytest.param(lambda t: t["events"][0].update(detector_version="ios-9.9.9"), id="event-detector-differs-from-trip"),
         pytest.param(lambda t: t.update(source="replayed"), id="replay-not-marked-demo"),
     ],
 )
@@ -382,7 +448,8 @@ def test_invalid_trip_uploads_are_rejected(client, break_trip):
 def test_nan_and_infinity_are_rejected(client):
     _, headers = new_user(client)
     json_headers = {**headers, "content-type": "application/json"}
-    trip = json.dumps(SAMPLE_TRIP).replace('"distance_mi": 6.4', '"distance_mi": NaN')
+    trip = json.dumps(SAMPLE_TRIP).replace(f'"distance_mi": {SAMPLE_TRIP["distance_mi"]}', '"distance_mi": NaN')
+    assert "NaN" in trip
     assert client.post("/trips", content=trip, headers=json_headers).status_code == 422
     car = '{"make": "HONDA", "equivalent_test_weight_lb": Infinity}'
     assert client.put("/users/me/vehicle", content=car, headers=json_headers).status_code == 422
@@ -391,14 +458,15 @@ def test_nan_and_infinity_are_rejected(client):
 def test_event_without_speeds_around_it_is_flagged_not_rejected(client, model_inputs):
     _, headers = new_user(client)
     trip = copy.deepcopy(SAMPLE_TRIP)
-    trip["speed_samples"] = [s for s in trip["speed_samples"] if s["sample_seq"] >= 10]  # nothing before the brake
+    trip["speed_samples"] = [s for s in trip["speed_samples"] if not 20 <= s["sample_seq"] < 30]  # nothing just before the brake
     res = upload(client, headers, trip)
     assert res.status_code == 201
-    client.get(res.json()["receipt_url"], headers=headers)
 
     brake, accel, turn = model_inputs[-1].events
     assert brake.speed_window_complete is False
     assert accel.speed_window_complete and turn.speed_window_complete
+    # The model needs readings at least every 3 s, so it keeps the trip unpriced.
+    assert "gps_gap_over_three_seconds" in client.get(res.json()["receipt_url"], headers=headers).json()["error"]["message"]
 
 
 def test_changed_trip_under_same_client_trip_id_conflicts(client):
@@ -429,29 +497,26 @@ def test_driver_belongs_to_one_crew_at_a_time(client):
     assert client.get(f"/crews/{first['crew_id']}", headers=alex).json()["member_count"] == 0
 
 
-def test_cost_model_input_without_car_or_optional_fields(client, model_inputs):
+def test_cost_model_input_without_optional_event_fields(client, model_inputs):
     _, headers = new_user(client)
     trip = copy.deepcopy(SAMPLE_TRIP)
     for event in trip["events"]:
         event.pop("duration_s", None)
         event.pop("heading_change_deg", None)
-    trip_id = upload(client, headers, trip).json()["trip_id"]
-    receipt = client.get(f"/trips/{trip_id}/receipt", headers=headers).json()
+    assert upload(client, headers, trip).status_code == 201
 
     inputs = model_inputs[-1]
-    assert inputs.vehicle is None
     assert all(e.duration_s is None and e.mean_accel_g is None and e.heading_change_deg is None for e in inputs.events)
-    assert receipt["avoidable_cost_usd"] == len(trip["events"])  # the placeholder still prices every event
 
 
-def test_receipt_keeps_the_car_from_upload_time(client):
+def test_every_trip_is_priced_as_the_models_car(client):
     _, headers = new_user(client)
-    client.put("/users/me/vehicle", json=SAMPLE_VEHICLE, headers=headers)
+    client.put("/users/me/vehicle", json={"make": "TOYOTA", "model": "PRIUS"}, headers=headers)
     trip_id = upload(client, headers).json()["trip_id"]
-    client.put("/users/me/vehicle", json={"make": "TOYOTA", "model": "PRIUS"}, headers=headers)  # switch cars afterwards
 
-    cost_input = client.get(f"/trips/{trip_id}/cost-input", headers=headers).json()
-    assert cost_input["vehicle"] == SAMPLE_VEHICLE
+    assert client.get(f"/trips/{trip_id}/cost-input", headers=headers).json()["vehicle"] == cost_model.SCORING_CONFIG["vehicle_profile"]
+    # The driver's own car stays on file for models that support more cars.
+    assert client.get("/users/me/vehicle", headers=headers).json() == {"make": "TOYOTA", "model": "PRIUS"}
 
 
 def test_cost_input_endpoint_matches_model_input_and_is_owner_only(client, model_inputs):

@@ -1,5 +1,5 @@
-# API image. Built from the repo root (see docker-compose.yml) so that
-# analytics/finance.py can be copied in once Person 3 adds it.
+# API image. Built from the repo root (see docker-compose.yml) so that the
+# data teammate's fuel model (drive_save_model/) can be copied in.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -13,7 +13,7 @@ COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY backend/ .
-# TODO(stage 3): COPY analytics/ ./analytics/
+COPY drive_save_model/ ./drive_save_model/
 
 RUN useradd --create-home --uid 10001 app
 USER app

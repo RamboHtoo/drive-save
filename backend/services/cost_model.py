@@ -1,12 +1,14 @@
-"""Turns a trip's harsh events into dollars.
+"""Prices a trip with the data teammate's Mazda5 fuel model (drive_save_model).
 
-build_input() gathers everything the cost model needs: the trip and its GPS
-speed readings, each event's speeds, acceleration, duration, turn angle and the
-readings from 10 s before to 10 s after it, the car's data exactly as the app
-sent it, and the fuel price.
-estimate() is the cost model itself. It's a placeholder that charges a flat $1
-per harsh event; the analytics teammate replaces its body (or imports their
-function here) and keeps the signature CostModelInput -> CostModelOutput.
+build_input() gathers everything about the trip: the trip and its GPS speed
+readings, each event's speeds, acceleration, duration, turn angle and the
+readings from 10 s before to 10 s after it, the vehicle profile and the fuel
+price. estimate() hands that to drive_save_model.estimate_trip and returns the
+result in the shape the database stores. See docs/cost-model.md.
+
+The model is experimental. It supports one car, a 2012 Mazda5, and its results
+may only be shown as demo data, which the shared schema enforces. So every trip
+is priced as that car, and every crew and trip is stored as demo (DEMO_ONLY).
 """
 
 from bisect import bisect_left, bisect_right
@@ -14,18 +16,14 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from uuid import UUID
 
+from drive_save_model import estimate_trip, scoring_config
 from pydantic import JsonValue
 
 from models.cost_model import CostModelInput, CostModelOutput, EventInput, TripInput
 from models.trips import Assumption, TripCreate
 
-COST_MODEL = "flat_per_event"
-COST_PER_EVENT_USD = 1.00
-# The database needs fuel used for every scored trip; until the real model lands, assume 25 mpg.
-PLACEHOLDER_MPG = 25.0
-_PLACEHOLDER_SET_ON = date(2026, 10, 24)
-
-# EIA weekly US average retail price, regular gasoline. Update when EIA publishes a new week.
+# EIA weekly US average retail price, regular gasoline. Update when EIA publishes a new week;
+# a new price makes a new scoring configuration, so every driver's baseline starts again.
 US_AVERAGE_FUEL_PRICE = Assumption(
     key="fuel_price",
     value=4.284,
@@ -33,8 +31,15 @@ US_AVERAGE_FUEL_PRICE = Assumption(
     source_url="https://www.eia.gov/dnav/pet/pet_pri_gnd_dcus_nus_w.htm",
     as_of=date(2026, 10, 19),
 )
+# The model's immutable configuration: version, Mazda5 profile, price and every assumption, with an id derived from them.
+SCORING_CONFIG = scoring_config(
+    US_AVERAGE_FUEL_PRICE.value,
+    price_as_of=US_AVERAGE_FUEL_PRICE.as_of.isoformat(),
+    price_source_url=US_AVERAGE_FUEL_PRICE.source_url,
+)
+DEMO_ONLY = True  # the schema accepts experimental results only on demo trips (trips_math_model_demo_only)
 
-EVENT_WINDOW = timedelta(seconds=10)  # readings handed to the model before and after each event
+EVENT_WINDOW = timedelta(seconds=10)  # readings included with each event before and after it
 _MPS_PER_MPH = 0.44704
 _STANDARD_GRAVITY = 9.80665  # m/s^2
 
@@ -43,7 +48,7 @@ _STANDARD_GRAVITY = 9.80665  # m/s^2
 class PricingRequest:
     trip_id: UUID
     trip: TripCreate
-    vehicle: dict[str, JsonValue] | None  # as the app sent it, when the trip was uploaded
+    vehicle: dict[str, JsonValue]  # the vehicle profile the trip is priced with
 
 
 def build_input(request: PricingRequest) -> CostModelInput:
@@ -83,6 +88,8 @@ def build_input(request: PricingRequest) -> CostModelInput:
             duration_s=(trip.ended_at - trip.started_at).total_seconds(),
             distance_mi=trip.distance_mi,
             avg_speed_mph=trip.avg_speed_mph,
+            source=trip.source,
+            is_demo=trip.is_demo,
             events_complete=trip.events_complete,
             detector_version=trip.detector_version,
             speed_samples=samples,
@@ -94,13 +101,43 @@ def build_input(request: PricingRequest) -> CostModelInput:
 
 
 def estimate(inputs: CostModelInput) -> CostModelOutput:
-    """The cost model. Placeholder: every harsh event costs $1, and the car is assumed to get 25 mpg."""
-    return CostModelOutput(
-        model_name=COST_MODEL,
-        event_costs_usd=[COST_PER_EVENT_USD] * len(inputs.events),
-        fuel_gal=round(inputs.trip.distance_mi / PLACEHOLDER_MPG, 6),
-        assumptions=[
-            Assumption(key="cost_per_event", value=COST_PER_EVENT_USD, unit="USD/event", source_url=None, as_of=_PLACEHOLDER_SET_ON, is_estimate=True),
-            Assumption(key="placeholder_mpg", value=PLACEHOLDER_MPG, unit="mi/gal", source_url=None, as_of=_PLACEHOLDER_SET_ON, is_estimate=True),
+    """Runs the Mazda5 model. A trip it can't price comes back as insufficient_data, with the reason in quality_flags."""
+    trip = inputs.trip
+    result = estimate_trip(
+        vehicle_profile=inputs.vehicle,
+        speed_samples=[s.model_dump() for s in trip.speed_samples],
+        trip_metadata={
+            "started_at": trip.started_at,
+            "ended_at": trip.ended_at,
+            "distance_mi": trip.distance_mi,
+            "source": trip.source,
+            "is_demo": trip.is_demo,
+            "events_complete": trip.events_complete,
+            "detector_version": trip.detector_version,
+        },
+        scoring_config=SCORING_CONFIG,
+        events=[
+            {
+                "event_id": str(e.event_id),
+                "ts": e.ts,
+                "duration_s": e.duration_s,
+                "type": e.type.value,
+                "peak_g": e.peak_g,
+                "speed_before_mph": e.speed_before_mph,
+                "speed_after_mph": e.speed_after_mph,
+                "detector_version": e.detector_version,
+            }
+            for e in inputs.events
         ],
+    )
+    details = result["model_details"]
+    costs = {e["event_id"]: e["cost_usd"] for e in details.get("events", [])}
+    return CostModelOutput(
+        model_name=SCORING_CONFIG["model_version"],
+        status=result["status"],
+        event_costs_usd=[costs.get(str(e.event_id)) for e in inputs.events],
+        fuel_gal=result["fuel_gal"],
+        avoidable_usd=result["avoidable_usd"],
+        quality_flags=result["quality_flags"],
+        details=details if trip.is_demo else None,  # the schema stores experimental results only on demo trips
     )

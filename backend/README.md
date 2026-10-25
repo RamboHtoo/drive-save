@@ -13,7 +13,7 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 ./scripts/test-db.sh                     # local TimescaleDB on port 55432 with analytics/schema.sql applied
 cp .env.example .env                     # then set DATABASE_URL=postgresql://postgres:test@localhost:55432/postgres
-uvicorn main:app --reload --env-file .env
+PYTHONPATH=.. uvicorn main:app --reload --env-file .env   # .. puts the fuel model (drive_save_model/) on the path
 ```
 
 Then open http://localhost:8000/docs to try every endpoint in the browser.
@@ -42,7 +42,7 @@ The tests run against the local TimescaleDB (empty tables before each test). The
 | `models/` | Pydantic request/response schemas: the API contract |
 | `routes/` | One file per resource: users, trips, crews, leaderboard |
 | `models/cost_model.py` | What the cost model receives and returns. See [`docs/cost-model.md`](../docs/cost-model.md) |
-| `services/cost_model.py` | Builds the cost model input and calls the model. Placeholder: $1 per event until the real model lands |
+| `services/cost_model.py` | Builds the cost model input and prices the trip with the data teammate's Mazda5 model (`drive_save_model/`). See [`docs/cost-model.md`](../docs/cost-model.md) |
 | `db/002_event_details.sql` | Adds the sharp-turn angle (`heading_change_deg`) the backend stores to the shared schema |
 | `db/app_role.sql` | Least-privilege database role for the running app |
 | `scripts/test-db.sh` | Starts the local TimescaleDB used by tests and local runs |
@@ -53,6 +53,5 @@ The tables and analytics functions (`analytics/schema.sql`, `analytics/queries.s
 
 ## Next steps
 
-1. Cost model: replace the flat $1 per event in `services/cost_model.py` with the teammate's model.
-2. Live game: `POST /games` and `WS /ws/games/{code}`.
-3. Demo data: load `analytics/demo_seed.sql` and add a demo reset.
+1. Live game: `POST /games` and `WS /ws/games/{code}`.
+2. Demo data: load `analytics/demo_seed.sql` and add a demo reset.

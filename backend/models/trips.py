@@ -86,6 +86,8 @@ class TripCreate(StrictModel):
                 raise ValueError(f"event at {event.ts.isoformat()} is outside the trip window")
         if len({e.event_id for e in self.events}) != len(self.events):
             raise ValueError("event_id values must be unique within the trip")
+        if self.detector_version is not None and any(e.detector_version != self.detector_version for e in self.events):
+            raise ValueError("every event's detector_version must match the trip's detector_version")
         minutes = (self.ended_at - self.started_at).total_seconds() / 60
         if len(self.events) > max(minutes, 1) * MAX_EVENTS_PER_MINUTE:
             raise ValueError(f"more than {MAX_EVENTS_PER_MINUTE} events per minute")
@@ -130,8 +132,11 @@ class Receipt(BaseModel):
     trip_id: UUID
     distance_mi: float
     events: list[ReceiptEvent]
-    avoidable_cost_usd: float = Field(description="Sum of the event costs for this trip")
-    cost_model: str = Field(description='Model that produced the dollar amounts; "flat_per_event" ($1 per event) until the real model lands')
-    assumptions: list[Assumption]
+    avoidable_cost_usd: float = Field(description="Avoidable cost of the trip: its priced events plus any driving above 65 mph")
+    high_speed_cost_usd: float | None = Field(default=None, description="The part of avoidable_cost_usd from driving above 65 mph")
+    cost_model: str = Field(description="Version of the model that produced the amounts")
+    label: str | None = Field(default=None, description="Wording to show with the amounts")
+    assumptions: list[Assumption] = Field(description="Every numeric constant and data source the model used")
+    notes: list[str] = Field(default_factory=list, description="Assumptions that aren't numbers, such as the road conditions")
     is_estimate: bool = True
     is_demo: bool = False

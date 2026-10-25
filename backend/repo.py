@@ -7,6 +7,7 @@ follow docs/database-setup.md. The API's crews are the schema's leagues: tables
 leagues and league_members, column league_id.
 """
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -103,7 +104,9 @@ async def create_crew(name: str, creator_id: UUID, new_join_code: Callable[[], s
     for _ in range(5):  # retry on the rare join-code collision
         try:
             async with db.pool().acquire() as conn, conn.transaction():
-                crew_id = await conn.fetchval("INSERT INTO leagues (name, join_code) VALUES ($1, $2) RETURNING id", name, new_join_code())
+                crew_id = await conn.fetchval(
+                    "INSERT INTO leagues (name, join_code, is_demo) VALUES ($1, $2, $3) RETURNING id", name, new_join_code(), cost_model.DEMO_ONLY
+                )
                 await _join(conn, crew_id, creator_id)
                 return crew_id
         except asyncpg.UniqueViolationError:
@@ -135,6 +138,8 @@ async def get_crew(crew_id: UUID) -> Crew | None:
 
 async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
     """Stores and prices a trip atomically. Returns (trip_id, duplicate)."""
+    if cost_model.DEMO_ONLY:  # override what the app sent, before comparing retries
+        trip = trip.model_copy(update={"is_demo": True})
     async with db.pool().acquire() as conn, conn.transaction():
         # Serialize this driver's uploads so duplicate checks and baseline slots stay consistent.
         await conn.execute("SELECT 1 FROM users WHERE id = $1 FOR UPDATE", user.user_id)
@@ -163,10 +168,10 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             trip.detector_version,
         )
 
-        result = cost_model.estimate(cost_model.build_input(cost_model.PricingRequest(trip_id, trip, user.vehicle)))
+        inputs = cost_model.build_input(cost_model.PricingRequest(trip_id, trip, cost_model.SCORING_CONFIG["vehicle_profile"]))
+        result = await asyncio.to_thread(cost_model.estimate, inputs)  # CPU work, kept off the event loop
         if len(result.event_costs_usd) != len(trip.events):
             raise ApiError(500, "cost_model_error", "The cost model must return one cost per event")
-        scored = result.fuel_gal is not None
 
         await conn.executemany(
             """
@@ -176,7 +181,7 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             """,
             [
                 (e.ts, e.event_id, trip_id, e.type.value, e.peak_g, e.speed_before_mph, e.speed_after_mph,
-                 e.detector_version, _dec(cost) if scored else None, e.duration_s, e.heading_change_deg)
+                 e.detector_version, None if cost is None else _dec(cost), e.duration_s, e.heading_change_deg)
                 for e, cost in zip(trip.events, result.event_costs_usd)
             ],
         )
@@ -185,40 +190,39 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             [(s.ts, trip_id, s.sample_seq, s.speed_mps, s.speed_accuracy_mps) for s in trip.speed_samples],
         )
 
-        if scored:
+        if result.status == "scored":
             await _record_score(conn, user, trip, trip_id, result)
         else:
-            await conn.execute("UPDATE trips SET status = 'insufficient_data' WHERE id = $1", trip_id)
+            await conn.execute(
+                "UPDATE trips SET status = 'insufficient_data', quality_flags = $2, model_result = $3 WHERE id = $1",
+                trip_id,
+                result.quality_flags,
+                result.details,
+            )
     return trip_id, False
 
 
-async def _scoring_config(conn: asyncpg.Connection, result: CostModelOutput, vehicle: dict[str, JsonValue] | None) -> UUID:
-    """Configurations are immutable: reuse an identical one or insert a new one."""
-    args = (
-        result.model_name,
-        vehicle or {},
-        _dec(cost_model.US_AVERAGE_FUEL_PRICE.value),
-        [a.model_dump(mode="json") for a in result.assumptions],
-    )
-    existing = await conn.fetchval(
+async def _scoring_config(conn: asyncpg.Connection) -> UUID:
+    """The model's configuration is immutable and its id comes from its content, so storing it is idempotent."""
+    config = cost_model.SCORING_CONFIG
+    config_id = UUID(config["id"])
+    await conn.execute(
         """
-        SELECT id FROM scoring_configs
-        WHERE model_version = $1 AND vehicle_profile = $2 AND fuel_price_usd_per_gal = $3 AND assumptions = $4
-        ORDER BY created_at, id LIMIT 1
+        INSERT INTO scoring_configs (id, model_version, vehicle_profile, fuel_price_usd_per_gal, assumptions)
+        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING
         """,
-        *args,
+        config_id,
+        config["model_version"],
+        config["vehicle_profile"],
+        _dec(config["fuel_price_usd_per_gal"]),
+        config["assumptions"],
     )
-    if existing:
-        return existing
-    return await conn.fetchval(
-        "INSERT INTO scoring_configs (model_version, vehicle_profile, fuel_price_usd_per_gal, assumptions) VALUES ($1, $2, $3, $4) RETURNING id",
-        *args,
-    )
+    return config_id
 
 
 async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, trip_id: UUID, result: CostModelOutput) -> None:
-    config_id = await _scoring_config(conn, result, user.vehicle)
-    avoidable = sum(result.event_costs_usd)
+    config_id = await _scoring_config(conn)
+    avoidable = result.avoidable_usd
 
     # Baseline: the first 3 scored trips of at least a mile, per driver, configuration and demo flag.
     slot = None
@@ -233,12 +237,18 @@ async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, 
             slot = used + 1
 
     await conn.execute(
-        "UPDATE trips SET status = 'scored', scoring_config_id = $2, fuel_gal = $3, avoidable_usd = $4, baseline_slot = $5 WHERE id = $1",
+        """
+        UPDATE trips SET status = 'scored', scoring_config_id = $2, fuel_gal = $3, avoidable_usd = $4, baseline_slot = $5,
+                         quality_flags = $6, model_result = $7
+        WHERE id = $1
+        """,
         trip_id,
         config_id,
         _dec(result.fuel_gal),
         _dec(avoidable),
         slot,
+        result.quality_flags,
+        result.details,
     )
     await conn.execute(
         """
@@ -294,7 +304,7 @@ async def _load_trip(conn: asyncpg.Connection, trip_id: UUID) -> TripCreate:
 async def _owned_trip(conn: asyncpg.Connection, trip_id: UUID, user_id: UUID) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
-        SELECT t.user_id, t.status, t.distance_mi, t.avoidable_usd, t.is_demo,
+        SELECT t.user_id, t.status, t.distance_mi, t.avoidable_usd, t.is_demo, t.quality_flags, t.model_result,
                sc.model_version, sc.assumptions, sc.vehicle_profile
         FROM trips t LEFT JOIN scoring_configs sc ON sc.id = t.scoring_config_id
         WHERE t.id = $1
@@ -312,11 +322,14 @@ async def receipt(trip_id: UUID, user_id: UUID) -> Receipt:
     async with db.pool().acquire() as conn:
         t = await _owned_trip(conn, trip_id, user_id)
         if t["status"] != "scored":
-            raise ApiError(409, "trip_not_scored", "This trip doesn't have enough data to price")
+            reasons = ", ".join(t["quality_flags"]) or "it hasn't been priced"
+            raise ApiError(409, "trip_not_scored", f"The fuel model couldn't price this trip: {reasons}")
         events = await conn.fetch(
             "SELECT type, ts, speed_before_mph, speed_after_mph, cost_usd FROM trip_events WHERE trip_id = $1 ORDER BY ts, event_id",
             trip_id,
         )
+    details = t["model_result"] or {}  # empty for trips priced before the Mazda5 model
+    numeric = [a for a in t["assumptions"] if _is_number(a["value"]) and a["unit"]]
     return Receipt(
         trip_id=trip_id,
         distance_mi=float(t["distance_mi"]),
@@ -326,22 +339,30 @@ async def receipt(trip_id: UUID, user_id: UUID) -> Receipt:
                 ts=e["ts"],
                 speed_before_mph=e["speed_before_mph"],
                 speed_after_mph=e["speed_after_mph"],
-                cost_usd=_float(e["cost_usd"], 2),
+                cost_usd=_float(e["cost_usd"], 4),
             )
             for e in events
         ],
-        avoidable_cost_usd=_float(t["avoidable_usd"], 2),
+        avoidable_cost_usd=_float(t["avoidable_usd"], 4),
+        high_speed_cost_usd=_float(details.get("cost_breakdown_usd", {}).get("high_speed"), 4),
         cost_model=t["model_version"],
-        assumptions=[Assumption(**a) for a in t["assumptions"]],
+        label=details.get("receipt_label"),
+        assumptions=[Assumption(**a) for a in numeric],
+        notes=[f"{a['key']}: {a['value']}" for a in t["assumptions"] if a not in numeric],
         is_demo=t["is_demo"],
     )
+
+
+def _is_number(value: JsonValue) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 async def cost_input(trip_id: UUID, user_id: UUID) -> CostModelInput:
     async with db.pool().acquire() as conn:
         t = await _owned_trip(conn, trip_id, user_id)
         trip = await _load_trip(conn, trip_id)
-    vehicle = t["vehicle_profile"] or None  # an empty profile means the driver hadn't sent a car
+    # Unpriced trips have no stored configuration; the model got the same Mazda5 profile.
+    vehicle = t["vehicle_profile"] or cost_model.SCORING_CONFIG["vehicle_profile"]
     return cost_model.build_input(cost_model.PricingRequest(trip_id, trip, vehicle))
 
 
@@ -350,15 +371,17 @@ async def cost_input(trip_id: UUID, user_id: UUID) -> CostModelInput:
 
 async def progress(user_id: UUID) -> Progress:
     week = _week_start(datetime.now(timezone.utc))
+    demo = cost_model.DEMO_ONLY
     async with db.pool().acquire() as conn:
-        trips_counted = await conn.fetchval("SELECT count(*) FROM trips WHERE user_id = $1 AND NOT is_demo", user_id)
+        trips_counted = await conn.fetchval("SELECT count(*) FROM trips WHERE user_id = $1 AND is_demo = $2", user_id, demo)
         config_id = await conn.fetchval(
             """
             SELECT scoring_config_id FROM trips
-            WHERE user_id = $1 AND NOT is_demo AND scoring_config_id IS NOT NULL
+            WHERE user_id = $1 AND is_demo = $2 AND scoring_config_id IS NOT NULL
             ORDER BY accepted_seq DESC LIMIT 1
             """,
             user_id,
+            demo,
         )
         if config_id is None:
             return Progress(
@@ -371,21 +394,23 @@ async def progress(user_id: UUID) -> Progress:
                 est_savings_usd=0.0,
                 weekly=[],
             )
-        base = await conn.fetchrow("SELECT * FROM drive_save_baseline($1, $2, false)", user_id, config_id)
+        base = await conn.fetchrow("SELECT * FROM drive_save_baseline($1, $2, $3)", user_id, config_id, demo)
         this_week = await conn.fetchrow(
             """
             SELECT sum(distance_mi) AS miles, sum(avoidable_usd) AS usd FROM daily_user_metrics
-            WHERE user_id = $1 AND scoring_config_id = $2 AND NOT is_demo AND NOT is_baseline
-              AND day >= $3 AND day < $3 + INTERVAL '7 days'
+            WHERE user_id = $1 AND scoring_config_id = $2 AND is_demo = $3 AND NOT is_baseline
+              AND day >= $4 AND day < $4 + INTERVAL '7 days'
             """,
             user_id,
             config_id,
+            demo,
             week,
         )
         days = await conn.fetch(
-            "SELECT * FROM drive_save_progress($1, $2, false, $3, $4)",
+            "SELECT * FROM drive_save_progress($1, $2, $3, $4, $5)",
             user_id,
             config_id,
+            demo,
             week - timedelta(weeks=PROGRESS_WEEKS - 1),
             week + timedelta(days=7),
         )
@@ -408,7 +433,7 @@ async def progress(user_id: UUID) -> Progress:
         baseline_waste_per_mile_usd=_float(baseline, 4),
         current_waste_per_mile_usd=_float(current, 4),
         improvement_pct=_float((baseline - current) / baseline * 100, 1) if ready else None,
-        est_savings_usd=_float(baseline * miles - usd, 2) if ready else 0.0,
+        est_savings_usd=_float(baseline * miles - usd, 4) if ready else 0.0,
         weekly=[
             WeeklyPoint(week_start=week_start, miles=_float(m, 1), waste_per_mile_usd=_float(u / m if m else 0, 4))
             for week_start, (m, u) in sorted(weeks.items())
@@ -436,7 +461,7 @@ async def leaderboard(user_id: UUID, period: Period) -> Leaderboard:
                 user_id=r["user_id"],
                 nickname=r["nickname"],
                 improvement_pct=_float(r["improvement_pct"], 1),
-                est_savings_usd=_float(r["est_savings_usd"], 2) or 0.0,
+                est_savings_usd=_float(r["est_savings_usd"], 4) or 0.0,
                 trips_counted=r["trip_count"],
                 state=r["state"],
             )

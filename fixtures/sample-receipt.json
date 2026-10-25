@@ -1,41 +1,120 @@
 {
   "trip_id": "7ccf606b-8ddd-40b2-a419-987d9021e128",
-  "distance_mi": 6.4,
+  "distance_mi": 4.7017,
   "events": [
     {
       "type": "harsh_brake",
-      "ts": "2026-10-24T20:07:12Z",
+      "ts": "2026-10-24T20:01:30Z",
       "speed_before_mph": 34.0,
       "speed_after_mph": 12.0,
-      "cost_usd": 1.0
+      "cost_usd": 0.0096
     },
     {
       "type": "rapid_accel",
-      "ts": "2026-10-24T20:09:40Z",
-      "speed_before_mph": 8.0,
-      "speed_after_mph": 27.0,
-      "cost_usd": 1.0
+      "ts": "2026-10-24T20:02:00Z",
+      "speed_before_mph": 12.0,
+      "speed_after_mph": 45.0,
+      "cost_usd": 0.006
     },
     {
       "type": "sharp_turn",
-      "ts": "2026-10-24T20:14:05Z",
-      "speed_before_mph": 22.0,
-      "speed_after_mph": 20.0,
-      "cost_usd": 1.0
+      "ts": "2026-10-24T20:02:30Z",
+      "speed_before_mph": 21.0,
+      "speed_after_mph": 21.0,
+      "cost_usd": 0.0
     }
   ],
-  "avoidable_cost_usd": 3.0,
-  "cost_model": "flat_per_event",
+  "avoidable_cost_usd": 0.1182,
+  "high_speed_cost_usd": 0.1026,
+  "cost_model": "notion-mazda5-2012-auto-v1",
+  "label": "Estimated fuel savings; accuracy not yet validated",
   "assumptions": [
     {
-      "key": "cost_per_event",
-      "value": 1.0,
-      "unit": "USD/event",
-      "source_url": null,
+      "key": "marginal_wheel_efficiency",
+      "value": 0.3,
+      "unit": "fraction",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
       "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "idle_rate",
+      "value": 0.25,
+      "unit": "US-gal/hour",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "coast_deceleration",
+      "value": 0.05,
+      "unit": "g",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "enrichment_start_fraction",
+      "value": 0.5,
+      "unit": "rated power fraction",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "enrichment_max",
+      "value": 0.15,
+      "unit": "fraction",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "drivetrain_factor",
+      "value": 0.9,
+      "unit": "fraction",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "fuel_energy",
+      "value": 121320000.0,
+      "unit": "J/gasoline-equivalent US-gal",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "high_speed_reference",
+      "value": 65.0,
+      "unit": "mph; comparison only",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "endpoint_speed_tolerance",
+      "value": 2.0,
+      "unit": "m/s",
+      "source_url": "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a",
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    },
+    {
+      "key": "gas_price",
+      "value": 4.284,
+      "unit": "USD/US-gal",
+      "source_url": "https://www.eia.gov/dnav/pet/pet_pri_gnd_dcus_nus_w.htm",
+      "as_of": "2026-10-19",
       "is_estimate": true
     }
   ],
+  "notes": [
+    "road_conditions: level, no wind, warm engine",
+    "braking_fuel_cutoff: zero fuel during both scenario decelerations; unobserved assumption",
+    "event_context: earlier anticipation and different arrival times may be infeasible in traffic"
+  ],
   "is_estimate": true,
-  "is_demo": false
+  "is_demo": true
 }

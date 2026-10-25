@@ -1,9 +1,12 @@
-"""The contract between the backend and the cost model (owned by the analytics teammate).
+"""What the backend hands the cost model and what it gets back.
 
-The backend builds a CostModelInput for every trip, the model returns a
-CostModelOutput, and the backend turns that into the receipt. See docs/cost-model.md.
+services/cost_model.py builds a CostModelInput for every trip, prices it with
+the data teammate's Mazda5 model (drive_save_model), and returns a
+CostModelOutput that the backend stores and turns into the receipt. See
+docs/cost-model.md.
 """
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, Field, JsonValue
@@ -18,6 +21,8 @@ class TripInput(BaseModel):
     duration_s: float
     distance_mi: float
     avg_speed_mph: float
+    source: str
+    is_demo: bool
     events_complete: bool = Field(description="True only when the phone's detector ran for the whole trip")
     detector_version: str | None
     speed_samples: list[SpeedSample] = Field(description="Every GPS speed reading the phone sent, in time order")
@@ -43,15 +48,16 @@ class EventInput(BaseModel):
 
 class CostModelInput(BaseModel):
     trip: TripInput
-    vehicle: dict[str, JsonValue] | None = Field(
-        description="The car's data exactly as the app sent it (PUT /users/me/vehicle), as of the trip's upload; None if it never sent one"
-    )
-    fuel_price: Assumption = Field(description="US average retail regular gasoline price; list it in your assumptions")
+    vehicle: dict[str, JsonValue] = Field(description="The vehicle profile the trip is priced with: the model's 2012 Mazda5, the only car it supports")
+    fuel_price: Assumption = Field(description="US average retail regular gasoline price")
     events: list[EventInput]
 
 
 class CostModelOutput(BaseModel):
-    model_name: str = Field(description="Shown on the receipt as cost_model")
-    event_costs_usd: list[float] = Field(description="Exactly one cost per input event, in the same order")
-    fuel_gal: float | None = Field(default=None, description="Fuel the whole trip used; the database requires it for scored trips")
-    assumptions: list[Assumption] = Field(description="Every constant and data source the model used")
+    model_name: str = Field(description="Model version, shown on the receipt as cost_model")
+    status: Literal["scored", "insufficient_data"]
+    event_costs_usd: list[float | None] = Field(description="One cost per input event, in the same order; null when the trip isn't priced")
+    fuel_gal: float | None = Field(description="Fuel budget for the trip from label MPG; the database requires it for scored trips")
+    avoidable_usd: float | None = Field(description="Avoidable cost of the trip: its priced events plus driving above 65 mph")
+    quality_flags: list[str] = Field(description="Caveats for a priced trip, or why the trip couldn't be priced")
+    details: dict[str, JsonValue] | None = Field(description="The model's full result, stored with the trip as model_result")
