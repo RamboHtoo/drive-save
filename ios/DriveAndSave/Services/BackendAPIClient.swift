@@ -12,23 +12,32 @@ actor BackendAPIClient {
     private var resetNotice: String?
     private var mockLeague: APILeague?
     private var mockUploads: [UUID: (Data, APITripCreated, APIReceipt)] = [:]
-    init(mode: Mode = .mock, demoOnly: Bool = false, session: URLSession = .shared, credentialStore: any CredentialStore = KeychainCredentialStore()) {
-        self.mode = mode; self.demoOnly = demoOnly; self.session = session; self.credentialStore = credentialStore
+    init(mode: Mode = .mock, demoOnly: Bool = false, session: URLSession = .shared, mockLeague: APILeague? = nil, credentialStore: (any CredentialStore)? = nil) {
+        self.mockLeague = mockLeague
+        self.mode = mode; self.demoOnly = demoOnly; self.session = session; self.credentialStore = credentialStore ?? KeychainCredentialStore(account: { if case .mock = mode { return "offline-mock" }; return "https://drivesave.nuhylabs.com" }())
     }
     func identity() throws -> APIIdentity? {
-        if credential == nil, case .remote = mode { credential = try credentialStore.load() }
+        if credential == nil { credential = try credentialStore.load() }
         return credential.map { APIIdentity(userID: $0.userID, nickname: $0.nickname) }
     }
     func takeResetNotice() -> String? { defer { resetNotice = nil }; return resetNotice }
     @discardableResult
     func register(nickname: String, demoAccount: Bool) async throws -> APIIdentity {
+        guard try identity() == nil else { throw BackendError.invalidInput("An account already exists. Use Profile’s development account reset to register a different user.") }
+        return try await replaceCredential(nickname: nickname, demoAccount: demoAccount)
+    }
+    func resetLocalAccount() throws {
+        try credentialStore.clear()
+        credential = nil; mockLeague = nil; selectedVehicle = nil; resetNotice = nil
+    }
+    private func replaceCredential(nickname: String, demoAccount: Bool) async throws -> APIIdentity {
         let name = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...32).contains(name.count) else { throw BackendError.invalidInput("Nickname must have 1–32 characters.") }
         let user: APIUser
         if case .mock = mode { user = APIUser(user_id: UUID(), nickname: name, token: "offline-mock") }
         else { user = try APIJSON.decoder().decode(APIUser.self, from: await request("users", method: "POST", body: APIJSON.encoder().encode(["nickname": name]), protected: false)) }
         let stored = StoredCredential(userID: user.user_id, nickname: user.nickname, token: user.token, isDemoAccount: demoAccount)
-        if case .remote = mode { try credentialStore.save(stored) }
+        try credentialStore.save(stored)
         credential = stored; mockLeague = nil
         return APIIdentity(userID: user.user_id, nickname: user.nickname)
     }
@@ -114,7 +123,7 @@ actor BackendAPIClient {
         guard let response = response as? HTTPURLResponse else { throw BackendError.invalidResponse }
         if response.statusCode == 401 && protected {
             guard recover, let old = credential, old.isDemoAccount else { throw BackendError.expiredSession }
-            _ = try await register(nickname: old.nickname, demoAccount: true)
+            _ = try await replaceCredential(nickname: old.nickname, demoAccount: true)
             resetNotice = "The server rejected the saved session and may have been reset. A new demo user was registered. Previous server trips and league membership may no longer exist; local history is safe."
             if let selectedVehicle { _ = try await self.request("users/me/vehicle", method: "PUT", body: APIJSON.encoder().encode(selectedVehicle), recover: false) }
             return try await self.request(path, method: method, body: body, protected: protected, recover: false, query: query)

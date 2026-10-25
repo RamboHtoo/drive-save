@@ -5,8 +5,6 @@ struct APISettingsView: View {
     @EnvironmentObject private var backend: BackendViewModel
     @State private var remote = false
     @State private var baseURL = "https://drivesave.nuhylabs.com"
-    @State private var nickname = "HackPSU Demo"
-    @State private var demoAccount = true
     @State private var vehicleJSON = ""
     @State private var confirmedVehicle = false
     @State private var importing = false
@@ -20,15 +18,10 @@ struct APISettingsView: View {
                 Text(backend.isRemote ? "Remote · requests go to the selected server" : "Offline mock · no server requests").font(.caption).foregroundStyle(DS.mint)
             }
             Surface {
-                Eyebrow(text: "Driver registration")
-                TextField("Nickname", text: $nickname).accessibilityIdentifier("apiNickname")
-                Toggle("Demo account · allow recovery after server reset", isOn: $demoAccount)
-                Text("On a 401, demo accounts may be re-registered once with a clear reset notice. Other accounts require manual registration. Local trips remain safe.").font(.caption).foregroundStyle(DS.secondary)
-                if let identity = backend.identity {
-                    Text("Signed in as \(identity.nickname)").font(.headline)
-                    Text("User ID: \(identity.userID.uuidString)").font(.caption).textSelection(.enabled)
-                }
-                Button("Register user") { Task { await backend.register(nickname: nickname, demoAccount: demoAccount) } }.buttonStyle(.borderedProminent).accessibilityIdentifier("registerUser")
+                Eyebrow(text: "Driver profile")
+                if let identity = backend.identity { Text("Signed in as \(identity.nickname)").font(.headline) }
+                Text("Manage your account in Profile. Vehicle setup is only needed before uploading trips.").font(.subheadline).foregroundStyle(DS.secondary)
+                NavigationLink("Open Profile") { ProfileView() }
             }
             Surface {
                 Eyebrow(text: "Complete EPA vehicle row")
@@ -62,7 +55,7 @@ struct APISettingsView: View {
         }
         .navigationTitle("API & Vehicle").navigationBarTitleDisplayMode(.inline)
         .disabled(backend.isBusy)
-        .onAppear { remote = backend.isRemote; loadSelectedVehicle() }
+        .onAppear { remote = backend.isRemote; baseURL = backend.connectionURL; loadSelectedVehicle() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
             do {
                 let url = try result.get(); let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }

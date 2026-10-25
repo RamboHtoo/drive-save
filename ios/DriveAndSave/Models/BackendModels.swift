@@ -169,7 +169,7 @@ enum BackendError: LocalizedError {
             return prefix + (body?.message ?? "Server returned HTTP \(status).") + (details.isEmpty ? "" : "\n" + details)
         case .invalidResponse: return "The server returned an unexpected response."
         case .invalidInput(let text): return text
-        case .expiredSession: return "Sign-in expired or the server was reset. Register again. Local trips are safe."
+        case .expiredSession: return "Sign-in expired or the server was reset. Your saved identity was kept. To create a new test account, use the confirmed reset in Profile. Local trips are safe."
         case .keychain(let status):
             if status == -34018 { return "Secure sign-in requires app signing and Keychain entitlements. Build and run with signing enabled in Xcode." }
             return "The secure credential store is unavailable. Unlock your iPhone and retry."

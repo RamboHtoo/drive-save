@@ -30,9 +30,19 @@ The app follows the verified updated response rather than inventing a fallback s
 
 ## Authentication
 
-`BackendAPIClient` is an actor. `POST /users` sends only `nickname`. The returned token, user ID, nickname, and demo-recovery preference are stored in Keychain, scoped by API base URL, with `WhenUnlockedThisDeviceOnly` protection. UI receives only user ID/nickname. Tokens are never logged or written to UserDefaults, JSON files, or this repository.
+`BackendAPIClient` is an actor. `POST /users` sends only `nickname`. The returned token, user ID, nickname, and demo-recovery preference are stored in Keychain, scoped by API base URL, with `WhenUnlockedThisDeviceOnly` protection. UI receives only user ID/nickname. Tokens are never logged or written to UserDefaults, JSON files, or this repository. The non-secret connection mode/base URL and per-user league ID are persisted locally; credentials remain in Keychain.
 
 Protected requests include `Authorization: Bearer ...`. A demo-account 401 triggers one re-registration and one retry. The selected vehicle is restored before retrying protected uploads. A clear reset notice explains that old server trips/membership may be gone while local history remains. Non-demo sessions require manual registration. No server-reset endpoint is called.
+
+## Welcome, Profile, and four-device leagues
+
+Welcome now handles first-use nickname registration through the existing POST /users client. Startup restores the selected mode and its saved Keychain identity before deciding whether to show Welcome. Remote multiplayer is the default on a fresh install; offline demo is an explicit choice. The same real Keychain account names used by the previous remote client are preserved for migration. Ordinary sessions are never replaced automatically; optional development demo recovery retains the existing one-retry 401 behavior and now presents a prominent reset alert.
+
+`BackendAPIClient.register` refuses to overwrite a saved identity. Only Profile’s confirmed development reset clears that mode’s credentials. This is a local sign-in reset, not a rename, login, server reset, or delete endpoint. Local trip history and the other mode’s sign-in remain intact. Offline credentials are persisted to a separate Keychain entry, and the offline example league is restored locally. This does not turn offline mock mode into a multiplayer server.
+
+Profile is accessible from Home and Leagues. It shows nickname, user ID, member count and invitation actions; online/offline switching is available there without the technical screen. Leagues supports pull-to-refresh and explicit refresh. Copy/Share includes both the UUID and join code required by the API; Join League parses this local invitation format into those exact request values. No code-only lookup or new endpoint is invented. Driver names and nullable ranks use the current deployed member leaderboard.
+
+Tests use unique `--account-test-id=...` Keychain and local API-state namespaces, so first-launch checks never clear a real driver’s credentials. The live four-account check creates only new dedicated accounts and one new private league, uploads no trips, and verifies distinct user IDs, counts 1→4, shared member lists, active league status, and unranked drivers awaiting baselines. Device Keychain behavior is checked separately through the signed remote welcome UI and relaunch test.
 
 ## Critical server gap and replay isolation
 
@@ -40,7 +50,7 @@ The inspected backend scoring service and live progress endpoint currently count
 
 Therefore all app replay/simulated uploads use a separate Keychain identity with `demoOnly: true`. That client rejects real uploads and cannot create or join leagues. The normal driver client rejects demo uploads. Replay requests always use `source: replayed`, `is_demo: true`. This protects the normal driver's rankings in this app. Server-side exclusion is still required to protect against other clients or historical mixed data. `/backend` was not changed.
 
-The production smoke test uploads replay only under an isolated dedicated account with no league. Its private-league tests use different dedicated users with no replay trips and leave the league inactive at two members. No existing users/leagues/trips are modified or deleted.
+The earlier two-member production smoke test uploads replay only under an isolated dedicated account with no league. Its private-league tests use different dedicated users with no replay trips and leave the league inactive at two members. No existing users/leagues/trips are modified or deleted.
 
 ## Vehicle
 

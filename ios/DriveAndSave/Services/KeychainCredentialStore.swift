@@ -7,7 +7,7 @@ struct StoredCredential: Codable {
     let token: String
     let isDemoAccount: Bool
 }
-protocol CredentialStore { func load() throws -> StoredCredential?; func save(_ credential: StoredCredential) throws }
+protocol CredentialStore { func load() throws -> StoredCredential?; func save(_ credential: StoredCredential) throws; func clear() throws }
 struct KeychainCredentialStore: CredentialStore {
     var account = "https://drivesave.nuhylabs.com"
     private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.hackpsu.driveandsave.auth", kSecAttrAccount as String: account] }
@@ -18,6 +18,10 @@ struct KeychainCredentialStore: CredentialStore {
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw BackendError.keychain(status) }
         return try JSONDecoder().decode(StoredCredential.self, from: data)
+    }
+    func clear() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw BackendError.keychain(status) }
     }
     func save(_ credential: StoredCredential) throws {
         let data = try JSONEncoder().encode(credential)

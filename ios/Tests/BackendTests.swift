@@ -2,6 +2,7 @@ import Foundation
 
 final class MemoryCredentialStore: CredentialStore {
     var credential: StoredCredential?
+    func clear() throws { credential = nil }
     func load() throws -> StoredCredential? { credential }
     func save(_ credential: StoredCredential) throws { self.credential = credential }
 }
@@ -128,6 +129,36 @@ final class BackendStub: URLProtocol {
         BackendStub.handler = { _ in throw URLError(.notConnectedToInternet) }
         do { _ = try await api.getVehicle(); throw BackendError.invalidInput("Expected offline failure") }
         catch let error as URLError { try check(error.code == .notConnectedToInternet, "network loss remains retryable") }
+        let restored = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: credentials)
+        try check(try await restored.identity()?.userID == userID, "fresh client restores saved identity without a registration request")
+        do { _ = try await restored.register(nickname: "Overwrite", demoAccount: false); throw BackendError.invalidInput("Expected overwrite rejection") }
+        catch BackendError.invalidInput(let message) { try check(message.contains("already exists"), "existing identity cannot silently be overwritten") }
+        try await restored.resetLocalAccount()
+        try check(try await restored.identity() == nil && credentials.credential == nil, "explicit reset clears only the selected credential store")
+        BackendStub.handler = { _ in (500, Data()) }
+        do { _ = try await restored.register(nickname: "Retry", demoAccount: false); throw BackendError.invalidInput("Expected registration failure") }
+        catch BackendError.server(let code, _) { try check(code == 500 && credentials.credential == nil, "failed registration does not create or persist an identity") }
+        let protectedStore = MemoryCredentialStore()
+        let protectedID = UUID()
+        try protectedStore.save(StoredCredential(userID: protectedID, nickname: "Keep Me", token: "unit-token", isDemoAccount: false))
+        var unexpectedRegistrations = 0
+        BackendStub.handler = { request in
+            if request.url?.path == "/users" { unexpectedRegistrations += 1 }
+            return (401, Data())
+        }
+        let protectedClient = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: protectedStore)
+        do { _ = try await protectedClient.getVehicle(); throw BackendError.invalidInput("Expected expired session") }
+        catch BackendError.expiredSession { try check(unexpectedRegistrations == 0 && protectedStore.credential?.userID == protectedID, "401 never silently replaces an ordinary driver identity") }
+        let mockCredentials = MemoryCredentialStore()
+        let mock = BackendAPIClient(credentialStore: mockCredentials)
+        let mockUser = try await mock.register(nickname: "Offline", demoAccount: false)
+        let mockRestored = BackendAPIClient(credentialStore: mockCredentials)
+        try check(try await mockRestored.identity() == mockUser, "offline identity persists through its own credential store")
+        let remoteEmpty = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), credentialStore: MemoryCredentialStore())
+        try check(try await remoteEmpty.identity() == nil, "offline account does not become a remote identity")
+        let sharedInvite = "Join my Drive Save league: Friends\nLeague ID: \(userID.uuidString)\nInvite code: DEMO42"
+        try check(LeagueInvitation.parse(sharedInvite)?.id == userID && LeagueInvitation.parse(sharedInvite)?.code == "DEMO42", "shared invitation resolves exact league ID and code")
+        try check(LeagueInvitation.parse("DEMO42") == nil, "code-only invite is not fabricated into a league ID")
         print("\(passes) backend contract checks passed.")
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 /// Opt-in live check. Dedicated disposable accounts only. No token logging or disk persistence.
 private final class EphemeralCredentials: CredentialStore {
     var value: StoredCredential?
+    func clear() throws { value = nil }
     func load() throws -> StoredCredential? { value }
     func save(_ credential: StoredCredential) throws { value = credential }
 }

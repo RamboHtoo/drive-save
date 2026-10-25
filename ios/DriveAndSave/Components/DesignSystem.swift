@@ -70,11 +70,14 @@ struct TripRow: View {
 struct Screen<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        ScrollView { VStack(alignment: .leading, spacing: 24) { content }.padding(20).padding(.bottom, 24) }
-            // Reserve actual viewport space and clip before padding. A scroll-content inset alone
-            // still lets the floating iOS tab bar paint over controls while scrolling.
-            .clipped()
-            .padding(.bottom, 84)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) { content }
+                .padding(20)
+        }
+            // TabView supplies the native tab bar safe area. Keep the extra breathing room
+            // inside the scrolling content, so the last message can scroll above the bar
+            // without shrinking or clipping the viewport with a second tab bar reservation.
+            .contentMargins(.bottom, 24, for: .scrollContent)
             .background(DS.background).toolbarBackground(DS.background, for: .navigationBar)
     }
 }

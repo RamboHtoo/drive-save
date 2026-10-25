@@ -15,7 +15,23 @@ struct DriveAndSaveApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppViewModel
+    @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
+        Group {
+            if backend.isRestoringAccount {
+                ProgressView("Restoring your profile…").frame(maxWidth: .infinity, maxHeight: .infinity).background(DS.background)
+            } else if backend.identity == nil {
+                WelcomeView()
+            } else {
+                appTabs
+            }
+        }
+        .task { await backend.restoreAccount() }
+        .alert("Demo account recovered", isPresented: Binding(get: { backend.recoveryMessage != nil }, set: { if !$0 { backend.recoveryMessage = nil } })) {
+            Button("Understood") { backend.recoveryMessage = nil }
+        } message: { Text(backend.recoveryMessage ?? "") }
+    }
+    private var appTabs: some View {
         TabView {
             NavigationStack { HomeView() }.tabItem { Label("Home", systemImage: "square.grid.2x2.fill") }
             NavigationStack { CrewLeaderboardView() }.tabItem { Label("Leagues", systemImage: "person.3.fill") }

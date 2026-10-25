@@ -4,6 +4,7 @@ struct CrewLeaderboardView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Screen {
+            Label(backend.isRemote ? "Online multiplayer · \(backend.identity?.nickname ?? "Driver")" : "Offline demo · no multiplayer", systemImage: backend.isRemote ? "network" : "iphone").font(.caption).foregroundStyle(DS.mint)
             Eyebrow(text: "Your private league")
             Text("Less waste.\nMore bragging rights.").font(.system(size: 34, weight: .bold, design: .rounded))
             Text("Compete individually with drivers in your league. A league needs 4+ members for ranked standings.").foregroundStyle(DS.secondary)
@@ -18,10 +19,7 @@ struct CrewLeaderboardView: View {
                     if league.is_demo { DemoNotice() }
                     Text("\(league.member_count) members · \(league.canRank ? "Ranked league" : "Unranked — needs 4+ members")").foregroundStyle(DS.mint)
                     Text("League ID: \(league.crew_id.uuidString)").font(.caption).textSelection(.enabled)
-                    if let code = league.join_code {
-                        Text("Invite code: \(code)").font(.headline).textSelection(.enabled)
-                        ShareLink(item: "Join my Drive Save league. League ID: \(league.crew_id.uuidString) · Invite code: \(code)") { Label("Share invite", systemImage: "square.and.arrow.up") }
-                    }
+                    LeagueInviteActions(league: league)
                     Button("Refresh league & drivers") { Task { await backend.refreshLeague() } }.disabled(backend.isBusy)
                 }
                 if league.canRank {
@@ -57,6 +55,8 @@ struct CrewLeaderboardView: View {
             }
             BackendStatusView()
         }.navigationTitle("Leagues").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink { ProfileView() } label: { Label("Profile", systemImage: "person.crop.circle") } } }
+            .refreshable { await backend.refreshLeague() }
             .task { if backend.identity != nil { await backend.refreshLeague() } }
     }
 }
@@ -67,6 +67,7 @@ struct LeagueFormView: View {
     @State private var name = ""
     @State private var leagueID = ""
     @State private var inviteCode = ""
+    @State private var invitation = ""
     var body: some View {
         Screen {
             Surface {
@@ -75,6 +76,11 @@ struct LeagueFormView: View {
                     Text("You will join automatically. Four members are required for ranked play.").font(.caption).foregroundStyle(DS.secondary)
                     Button("Create League") { Task { await backend.createLeague(name: name) } }.accessibilityIdentifier("createLeague")
                 } else {
+                    TextField("Paste full invitation", text: $invitation, axis: .vertical).accessibilityIdentifier("leagueInvitation")
+                        .onChange(of: invitation) { _, value in
+                            if let invite = LeagueInvitation.parse(value) { leagueID = invite.id.uuidString; inviteCode = invite.code }
+                        }
+                    Text("Paste your friend’s shared invitation above, or enter both details below.").font(.caption).foregroundStyle(DS.secondary)
                     TextField("League UUID", text: $leagueID).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("leagueUUID")
                     TextField("Invite code", text: $inviteCode).textInputAutocapitalization(.characters).autocorrectionDisabled().accessibilityIdentifier("leagueCode")
                     Text("Enter both values from the shared invite. The API cannot look up a league using only its code. Joining moves you out of your previous league.").font(.caption).foregroundStyle(DS.secondary)
@@ -82,7 +88,7 @@ struct LeagueFormView: View {
                 }
             }.buttonStyle(.borderedProminent).disabled(backend.isBusy)
             if let league = backend.league { Text("Current league: \(league.name)").font(.headline).foregroundStyle(DS.mint) }
-            NavigationLink("API registration") { APISettingsView() }
+            NavigationLink("Your profile") { ProfileView() }
             BackendStatusView()
         }.navigationTitle(creating ? "Create League" : "Join League").navigationBarTitleDisplayMode(.inline)
     }

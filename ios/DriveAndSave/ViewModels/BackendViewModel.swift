@@ -9,6 +9,9 @@ private struct SavedUpload: Codable {
     let mock: Bool
 }
 private struct BackendLocalState: Codable {
+    var remoteMode: Bool?
+    var baseURL: String?
+    var offlineLeague: APILeague?
     var vehicle: VehicleRow?
     var vehicleConfirmed = false
     var leagueByUser: [String: UUID] = [:]
@@ -18,7 +21,9 @@ private struct BackendLocalState: Codable {
 
 @MainActor
 final class BackendViewModel: ObservableObject {
-    @Published private(set) var isRemote = false
+    @Published private(set) var isRemote = true
+    @Published private(set) var isRestoringAccount = true
+    @Published var recoveryMessage: String?
     @Published private(set) var identity: APIIdentity?
     @Published private(set) var isBusy = false
     @Published private(set) var vehicle: VehicleRow?
@@ -29,18 +34,36 @@ final class BackendViewModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var errorMessage: String?
     @Published private var revision = 0
-    private let credentialSuffix = ProcessInfo.processInfo.arguments.contains("--isolated-api-test") ? "#ui-api-test" : ""
+    private let credentialSuffix: String = {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let id = arguments.first(where: { $0.hasPrefix("--account-test-id=") }) { return "#" + id }
+        return arguments.contains("--isolated-api-test") ? "#ui-api-test" : ""
+    }()
     private var api = BackendAPIClient()
     private var replayAPI = BackendAPIClient(demoOnly: true)
     private var remoteURL = "https://drivesave.nuhylabs.com"
     private var state = BackendLocalState()
     private let fileURL: URL
     init() {
-        fileURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("DriveSave/backend-state.json")
+        fileURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("DriveSave/backend-state\(credentialSuffix).json")
         do {
             if FileManager.default.fileExists(atPath: fileURL.path) { state = try JSONDecoder().decode(BackendLocalState.self, from: Data(contentsOf: fileURL)) }
             vehicle = state.vehicle; vehicleConfirmed = state.vehicleConfirmed
         } catch { errorMessage = "Saved API settings could not be read. \(error.localizedDescription)" }
+    }
+    func restoreAccount() async {
+        guard isRestoringAccount else { return }
+        await connect(remote: state.remoteMode ?? true, baseURL: state.baseURL ?? remoteURL)
+        isRestoringAccount = false
+        if identity != nil { await refreshLeague() }
+    }
+    var connectionURL: String { remoteURL }
+    func resetAccount() async {
+        await run {
+            try await api.resetLocalAccount()
+            if !isRemote { state.offlineLeague = nil; try persist() }
+            identity = nil; league = nil; standings = []; notice = nil
+        }
     }
     private func persist() throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -53,24 +76,25 @@ final class BackendViewModel: ObservableObject {
         isBusy = true; errorMessage = nil
         defer { isBusy = false }
         do { try await operation() }
-        catch let error as URLError { errorMessage = "Network unavailable or interrupted. Retry when connected; the same client trip ID and saved payload will be reused. \(error.localizedDescription)" }
+        catch let error as URLError { errorMessage = "Network unavailable or interrupted. Check your connection and retry. Saved trips remain on this device. \(error.localizedDescription)" }
         catch { errorMessage = error.localizedDescription }
         do {
             let updated = try await api.identity()
             if identity != updated { identity = updated; league = nil; standings = [] }
-            if let message = await api.takeResetNotice() { notice = message; league = nil; standings = [] }
+            if let message = await api.takeResetNotice() { notice = message; recoveryMessage = message; league = nil; standings = [] }
         } catch { errorMessage = error.localizedDescription }
     }
     func connect(remote: Bool, baseURL: String) async {
         await run {
             let url = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines))
             guard !remote || (url?.scheme == "https" && url?.host != nil && url?.user == nil && url?.password == nil && url?.query == nil && url?.fragment == nil) else { throw BackendError.invalidInput("Enter a valid HTTPS API base URL.") }
-            api = BackendAPIClient(mode: remote ? .remote(url!) : .mock, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix))
-            replayAPI = BackendAPIClient(mode: remote ? .remote(url!) : .mock, demoOnly: true, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + "#isolated-replay"))
+            api = BackendAPIClient(mode: remote ? .remote(url!) : .mock, mockLeague: remote ? nil : state.offlineLeague, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock")))
+            replayAPI = BackendAPIClient(mode: remote ? .remote(url!) : .mock, demoOnly: true, credentialStore: KeychainCredentialStore(account: baseURL + credentialSuffix + (remote ? "" : "#offline-mock") + "#isolated-replay"))
             remoteURL = baseURL
             isRemote = remote; identity = nil; league = nil; standings = []
             notice = remote ? "Remote API selected. Register or restore your saved Keychain session before uploading." : "Offline mock API selected. Nothing is sent to the server."
             identity = try await api.identity()
+            state.remoteMode = remote; state.baseURL = baseURL; try persist()
         }
     }
     func register(nickname: String, demoAccount: Bool) async {
@@ -128,7 +152,7 @@ final class BackendViewModel: ObservableObject {
         }
     }
     private func submit(_ payload: APITripPayload) async throws {
-        guard let identity else { throw BackendError.invalidInput("Register a user in API & Vehicle first.") }
+        guard let identity else { throw BackendError.invalidInput("Complete welcome registration first.") }
         let uploadKey = key(payload.client_trip_id)
         if state.uploads[uploadKey] == nil {
             guard let vehicle else { throw BackendError.invalidInput("Select the complete EPA vehicle JSON row first.") }
@@ -154,13 +178,14 @@ final class BackendViewModel: ObservableObject {
         state.uploads[uploadKey] = record; try persist()
         if !isRemote { notice = "Offline mock receipt. No trip was sent to the server." }
         else if payload.is_demo { notice = "Demo replay uploaded under an isolated account that cannot join leagues in this app. Your driver account's rankings are unaffected." }
-        if let reset = await uploadAPI.takeResetNotice() { notice = reset }
+        if let reset = await uploadAPI.takeResetNotice() { notice = reset; recoveryMessage = reset }
     }
     func createLeague(name: String) async {
         await run {
-            guard identity != nil else { throw BackendError.invalidInput("Register in API & Vehicle first.") }
+            guard identity != nil else { throw BackendError.invalidInput("Complete welcome registration first.") }
             let created = try await api.createLeague(name: name)
             league = created; standings = []
+            if !isRemote { state.offlineLeague = created }
             if let id = try await api.identity()?.userID { state.leagueByUser[key(id)] = created.crew_id; try persist() }
             notice = "League created. You compete individually; rankings require 4+ members."
         }

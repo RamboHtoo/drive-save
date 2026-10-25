@@ -14,6 +14,7 @@ struct HomeView: View {
                     .font(.headline).frame(maxWidth: .infinity).padding(18)
                     .foregroundStyle(DS.background).background(DS.mint, in: RoundedRectangle(cornerRadius: 18))
             }.accessibilityIdentifier("startTrip")
+            NavigationLink { ProfileView() } label: { Label("Profile", systemImage: "person.crop.circle.fill") }.accessibilityIdentifier("openProfile")
             NavigationLink { APISettingsView() } label: { Label("API & Vehicle", systemImage: "person.crop.circle") }
             if model.client.isMock { DemoNotice(); Text("Cost totals use demo trips. New recordings show estimate pending.").font(.caption).foregroundStyle(DS.secondary) }
             Surface {
