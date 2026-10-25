@@ -184,6 +184,34 @@ def test_everything_is_demo_data_while_the_model_is_experimental(client):
     assert client.get("/leaderboard", headers=headers).json()["is_demo"] is True
 
 
+def test_an_account_never_mixes_recorded_and_test_trips(client):
+    """is_demo is true for every trip while the model is experimental, so the source keeps a calculation
+    test or a replay from filling a real driver's baseline."""
+    driver_id, driver = new_user(client, "driver")
+    tester_id, tester = new_user(client, "tester")
+    synthetic = fresh_trip() | {"source": "synthetic", "is_demo": True}
+    replayed = fresh_trip() | {"source": "replayed", "is_demo": True}
+
+    assert upload(client, driver, fresh_trip()).status_code == 201
+    for trip in (synthetic, replayed):
+        res = upload(client, driver, trip)
+        assert res.status_code == 409
+        assert res.json()["error"]["code"] == "mixed_trip_sources"
+
+    assert upload(client, tester, synthetic).status_code == 201
+    assert upload(client, tester, replayed).status_code == 201  # both are test trips
+    assert upload(client, tester, fresh_trip()).json()["error"]["code"] == "mixed_trip_sources"
+    assert upload(client, tester, synthetic).json()["duplicate"] is True  # retries still succeed
+
+    stored = query("SELECT user_id, source FROM trips ORDER BY accepted_seq")
+    assert [(str(r["user_id"]), r["source"]) for r in stored] == [
+        (driver_id, "recorded"),
+        (tester_id, "synthetic"),
+        (tester_id, "replayed"),
+    ]
+    assert client.get(f"/users/{driver_id}/progress", headers=driver).json()["trips_counted"] == 1
+
+
 def scored_trip(user_id, league_id, config_id, *, is_demo, miles, usd, baseline_slot=None, ago=timedelta(minutes=10)):
     """Inserts a priced trip and its metrics row directly: the API can't make a real (non-demo) one while
     the model is experimental. No model_result, so the schema's demo-only model checks don't apply."""

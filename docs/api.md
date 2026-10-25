@@ -91,7 +91,7 @@ Example request: [`fixtures/sample-trip.json`](../fixtures/sample-trip.json).
 | `started_at`, `ended_at` | datetime | `ended_at` must be after `started_at` |
 | `distance_mi` | number | Greater than 0, at most 1000 |
 | `avg_speed_mph` | number | 0 to 120 |
-| `source` | string, optional | `recorded` (default), `replayed` or `synthetic`. Replayed and synthetic trips must set `is_demo: true` |
+| `source` | string, optional | `recorded` (default), `replayed` or `synthetic`. Replayed and synthetic trips must set `is_demo: true`. An account holds either recorded trips or test trips (replayed and synthetic), never both: uploading the other kind returns `409` with `mixed_trip_sources`, so use a separate test account for replays and calculation tests |
 | `is_demo` | boolean, optional | Ignored for now: while the fuel model is experimental, every trip is stored as a demo trip and responses say `is_demo: true` |
 | `events_complete` | boolean, optional | **Needed for a receipt.** Set `true` only when the event detector ran for the whole trip, so `events` lists every harsh moment. Default `false`: the trip is stored but not priced |
 | `detector_version` | string, optional | **Needed for a receipt.** Version of the detector that ran for the trip, e.g. `"ios-0.1.0"` (1 to 64 characters). Every event's `detector_version` must match it |

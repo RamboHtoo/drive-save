@@ -64,7 +64,9 @@ class TripCreate(StrictModel):
     ended_at: AwareDatetime
     distance_mi: float = Field(gt=0, le=1000)
     avg_speed_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
-    source: Literal["recorded", "replayed", "synthetic"] = Field(default="recorded", description="Replayed and synthetic trips must be demo trips")
+    source: Literal["recorded", "replayed", "synthetic"] = Field(
+        default="recorded", description="Replayed and synthetic trips must be demo trips, uploaded by an account with no recorded trips"
+    )
     is_demo: bool = False
     events_complete: bool = Field(default=False, description="True only when the phone's detector ran for the whole trip, so events lists every harsh moment")
     detector_version: Text | None = Field(

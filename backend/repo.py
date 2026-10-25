@@ -213,6 +213,7 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             if await _load_trip(conn, existing) != trip:
                 raise ApiError(409, "trip_conflict", "A different trip was already uploaded with this client_trip_id")
             return existing, True
+        await _check_trip_source(conn, user.user_id, trip.source)
 
         trip_id = await conn.fetchval(
             """
@@ -266,6 +267,17 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
                 result.details,
             )
     return trip_id, False
+
+
+async def _check_trip_source(conn: asyncpg.Connection, user_id: UUID, source: str) -> None:
+    """A driver holds either recorded trips or test trips (replayed and synthetic), never both. While every
+    trip is demo data, is_demo can't tell them apart, so this keeps test inputs out of a real driver's
+    baseline, progress and standing."""
+    recorded = source == "recorded"
+    if await conn.fetchval("SELECT EXISTS (SELECT 1 FROM trips WHERE user_id = $1 AND (source = 'recorded') <> $2)", user_id, recorded):
+        if recorded:
+            raise ApiError(409, "mixed_trip_sources", "This is a test account with replayed or synthetic trips; upload recorded trips with a driver account")
+        raise ApiError(409, "mixed_trip_sources", "This account has recorded trips; upload replayed and synthetic trips with a separate test account")
 
 
 async def _pricing_vehicle(conn: asyncpg.Connection, driver_vehicle: dict[str, JsonValue] | None) -> dict[str, JsonValue]:
