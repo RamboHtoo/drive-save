@@ -7,6 +7,7 @@ private struct SavedUpload: Codable {
     var serverTripID: UUID?
     var receipt: APIReceipt?
     let mock: Bool
+    var insufficientReason: String? = nil
 }
 private struct BackendLocalState: Codable {
     var remoteMode: Bool?
@@ -233,21 +234,58 @@ final class BackendViewModel: ObservableObject {
     func receipt(for trip: Trip) -> APIReceipt? {
         _ = revision
         guard let id = trip.clientTripID, let record = state.uploads[key(id)], record.mock == !isRemote else { return nil }
-        if isRemote && !record.payload.is_demo && record.owner != identity?.userID { return nil }
+        if !record.payload.is_demo && record.owner != identity?.userID { return nil }
         return record.receipt
     }
     var replayReceipt: APIReceipt? {
         _ = revision
         guard let replay = state.replay, let record = state.uploads[key(replay.client_trip_id)] else { return nil }
-        if isRemote && !record.payload.is_demo && record.owner != identity?.userID { return nil }
+        if !record.payload.is_demo && record.owner != identity?.userID { return nil }
         return record.receipt
     }
-    func unsupportedReason(for trip: Trip) -> String? {
+    private var recordingAccountScope: String { isRemote ? remoteURL : "mock" }
+    func recordingContext() -> RecordingContext? {
+        guard let owner = identity?.userID else { return nil }
+        return RecordingContext(ownerID: owner, accountScope: recordingAccountScope, vehicle: vehicle, vehicleConfirmed: vehicleConfirmed)
+    }
+    func insufficientReason(for trip: Trip) -> String? {
+        _ = revision
+        if let id = trip.clientTripID, let record = state.uploads[key(id)],
+           record.mock == !isRemote, record.payload.is_demo || record.owner == identity?.userID,
+           let reason = record.insufficientReason { return reason }
+        if let reason = TripUploadBuilder.scoringIssue(for: trip) { return reason }
         do { _ = try TripUploadBuilder.payload(for: trip); return nil }
         catch { return error.localizedDescription }
     }
+    private func validateRecordingContext(_ trip: Trip) throws -> RecordingContext {
+        guard let context = trip.recordingContext else {
+            throw BackendError.invalidInput("This older recording has no recording-start account and vehicle snapshot. Keep it locally for inspection; record a new trip to upload.")
+        }
+        try context.validate(ownerID: identity?.userID, accountScope: recordingAccountScope)
+        guard let row = context.vehicle, context.vehicleConfirmed else {
+            throw BackendError.invalidInput("No confirmed vehicle was selected when this recording began. Select My Vehicle before your next drive.")
+        }
+        guard let catalog = try? CatalogVehicle(row: row), catalog.supportsFuelModel else {
+            throw BackendError.invalidInput("The vehicle selected when recording began does not support fuel estimates.")
+        }
+        return context
+    }
+    func unsupportedReason(for trip: Trip) -> String? {
+        do {
+            if trip.source == .measured { _ = try validateRecordingContext(trip) }
+            if let reason = TripUploadBuilder.scoringIssue(for: trip) { return reason }
+            _ = try TripUploadBuilder.payload(for: trip)
+            return nil
+        } catch { return error.localizedDescription }
+    }
     func upload(trip: Trip) async {
-        await run { try await submit(TripUploadBuilder.payload(for: trip)) }
+        await run {
+            // Verify the start identity before building, persisting, PUT, POST, or receipt access.
+            let context = trip.source == .measured ? try validateRecordingContext(trip) : nil
+            let payload = try TripUploadBuilder.payload(for: trip)
+            if let reason = TripUploadBuilder.scoringIssue(for: trip) { throw BackendError.invalidInput(reason) }
+            try await submit(payload, recordingContext: context)
+        }
         await refreshProgress()
     }
     func replayContractFixture() async {
@@ -260,15 +298,19 @@ final class BackendViewModel: ObservableObject {
             try await submit(state.replay!)
         }
     }
-    private func submit(_ payload: APITripPayload) async throws {
+    private func submit(_ payload: APITripPayload, recordingContext: RecordingContext? = nil) async throws {
         guard let identity else { throw BackendError.invalidInput("Complete welcome registration first.") }
+        if !payload.is_demo {
+            guard let recordingContext else { throw BackendError.invalidInput("Missing recording-start identity.") }
+            try recordingContext.validate(ownerID: identity.userID, accountScope: recordingAccountScope)
+        }
         let uploadKey = key(payload.client_trip_id)
         if state.uploads[uploadKey] == nil {
-            guard let vehicle else { throw BackendError.invalidInput("Select the complete EPA vehicle JSON row first.") }
+            guard let vehicle = payload.is_demo ? vehicle : recordingContext?.vehicle else { throw BackendError.invalidInput("Select a vehicle before recording.") }
             if !payload.is_demo, vehicle["supported"] == .bool(false) || (try? CatalogVehicle(row: vehicle))?.supportsFuelModel == false {
                 throw BackendError.invalidInput("This vehicle is not supported for fuel estimates. Choose another vehicle in Profile → My Vehicle. Your trip remains saved locally.")
             }
-            if !payload.is_demo && !vehicleConfirmed { throw BackendError.invalidInput("Confirm the selected EPA row matches your actual vehicle before uploading a real trip.") }
+            if !payload.is_demo && recordingContext?.vehicleConfirmed != true { throw BackendError.invalidInput("Confirm the selected EPA row matches your actual vehicle before uploading a real trip.") }
             state.uploads[uploadKey] = SavedUpload(payload: payload, vehicle: vehicle, owner: identity.userID, mock: !isRemote)
             try persist() // Freeze the UUID, full request, and vehicle before the first network attempt.
         }
@@ -278,15 +320,29 @@ final class BackendViewModel: ObservableObject {
             _ = try await uploadAPI.register(nickname: String(identity.nickname.prefix(18)) + " Replay Demo", demoAccount: true)
         }
         let currentOwner = try await uploadAPI.identity()?.userID
-        if record.owner != currentOwner { record.serverTripID = nil; record.receipt = nil }
+        if record.owner != currentOwner {
+            guard payload.is_demo else { throw BackendError.expiredSession }
+            record.serverTripID = nil; record.receipt = nil
+        }
+        let expectedOwner = payload.is_demo ? nil : recordingContext?.ownerID
         if record.serverTripID == nil {
-            let result = try await uploadAPI.upload(record.payload, vehicle: record.vehicle)
+            let result = try await uploadAPI.upload(record.payload, vehicle: record.vehicle, expectedOwnerID: expectedOwner)
             record.serverTripID = result.trip_id
             record.owner = try await uploadAPI.identity()?.userID ?? identity.userID
+            if let expectedOwner, record.owner != expectedOwner { throw BackendError.expiredSession }
             state.uploads[uploadKey] = record; try persist()
             notice = result.duplicate ? "Duplicate upload recognized (200). Fetching the original receipt." : "Trip accepted (201). Fetching receipt."
         }
-        record.receipt = try await uploadAPI.receipt(tripID: record.serverTripID!)
+        do {
+            record.receipt = try await uploadAPI.receipt(tripID: record.serverTripID!, expectedOwnerID: expectedOwner)
+            record.insufficientReason = nil
+        } catch BackendError.server(let status, let body) where body?.code == "trip_not_scored" {
+            record.insufficientReason = BackendError.server(status, body).localizedDescription
+            state.uploads[uploadKey] = record; try persist()
+            // Normal screens use a concise state; the exact response remains in Developer Mode.
+            notice = "Insufficient recording data"
+            return
+        }
         state.uploads[uploadKey] = record; try persist()
         if !isRemote { notice = "Offline mock receipt. No trip was sent to the server." }
         else if payload.is_demo { notice = "Demo replay uploaded under an isolated account that cannot join leagues in this app. Your driver account's rankings are unaffected." }

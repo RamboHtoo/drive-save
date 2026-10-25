@@ -51,6 +51,43 @@ struct DrivingEvent: Codable, Hashable, Identifiable {
     var peakG: Double? = nil
 }
 
+/// Frozen locally at Start; never contains authentication secrets.
+struct RecordingContext: Codable, Hashable {
+    let ownerID: UUID
+    let accountScope: String
+    let vehicle: VehicleRow?
+    let vehicleConfirmed: Bool
+
+    func validate(ownerID: UUID?, accountScope: String) throws {
+        guard self.ownerID == ownerID, self.accountScope == accountScope else {
+            throw BackendError.invalidInput("This recording belongs to a different account or server. Sign in to its original account to upload it.")
+        }
+    }
+}
+
+/// Evidence, not an inference from an empty event list. Boundary gaps remain incomplete.
+struct DetectorCoverage: Codable, Hashable {
+    let startedUptime: Double
+    private(set) var firstObservation: Double?
+    private(set) var lastObservation: Double?
+    private(set) var failures: [String] = []
+
+    mutating func invalidate(_ reason: String) {
+        if !failures.contains(reason) { failures.append(reason) }
+    }
+    mutating func observe(uptime: Double) {
+        guard uptime.isFinite, uptime >= startedUptime else { return }
+        if let lastObservation, uptime <= lastObservation { invalidate("Non-monotonic detector samples"); return }
+        if let lastObservation, uptime - lastObservation > 1 { invalidate("Motion sample gap") }
+        if firstObservation == nil { firstObservation = uptime }
+        lastObservation = uptime
+    }
+    func complete(through endedUptime: Double) -> Bool {
+        guard failures.isEmpty, let firstObservation, let lastObservation else { return false }
+        return endedUptime > startedUptime && firstObservation <= startedUptime && lastObservation >= endedUptime
+    }
+}
+
 struct RecordingDetails: Codable, Hashable {
     let endedAt: Date
     let elapsedSeconds: Double
@@ -67,6 +104,9 @@ struct RecordingDetails: Codable, Hashable {
     var calibrationValidAtEnd: Bool? = nil
     var measurementsIncomplete: Bool? = nil
     var speedSamples: [APISpeedSample]? = nil
+    var eventsComplete: Bool? = nil
+    var detectorVersion: String? = nil
+    var detectorCoverage: DetectorCoverage? = nil
 }
 
 struct DetectionConfiguration: Codable, Hashable {
@@ -80,6 +120,7 @@ struct DetectionConfiguration: Codable, Hashable {
 
 /// Candidate detection only; thresholds require real-device validation.
 struct CandidateEventDetector {
+    static let version = "ios-0.2.0"
     var configuration = DetectionConfiguration()
     private var starts: [DrivingEventKind: Double] = [:]
     private var peaks: [DrivingEventKind: Double] = [:]
@@ -102,7 +143,7 @@ struct CandidateEventDetector {
                uptime - (lastEvents[kind] ?? -.infinity) >= configuration.cooldown {
                 let duration = uptime - (starts[kind] ?? uptime)
                 let peak = peaks[kind] ?? magnitude
-                result.append(.init(timestamp: date.addingTimeInterval(-duration), kind: kind, magnitude: peak, detectorVersion: "ios-0.2.0", durationSeconds: duration, peakG: peak / 9.80665))
+                result.append(.init(timestamp: date.addingTimeInterval(-duration), kind: kind, magnitude: peak, detectorVersion: Self.version, durationSeconds: duration, peakG: peak / 9.80665))
                 lastEvents[kind] = uptime
                 starts[kind] = nil
                 peaks[kind] = nil

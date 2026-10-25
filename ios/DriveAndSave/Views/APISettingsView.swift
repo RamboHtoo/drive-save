@@ -94,17 +94,11 @@ struct TripUploadSection: View {
     var body: some View {
         Surface {
             if backend.unsupportedReason(for: trip) != nil {
-                Text("Insufficient trip data for a fuel estimate.").font(.subheadline).foregroundStyle(DS.secondary)
-            } else if backend.vehicle?["supported"] == .bool(false) || backend.vehicle.flatMap({ try? CatalogVehicle(row: $0) })?.supportsFuelModel == false {
-                Text("Fuel estimates are unavailable for this vehicle.").font(.subheadline).foregroundStyle(DS.secondary)
-                NavigationLink("My Vehicle") { MyVehicleView() }
-            } else if backend.vehicle == nil || !backend.vehicleConfirmed {
-                Text("Select your vehicle to request an estimate.").font(.subheadline).foregroundStyle(DS.secondary)
-                NavigationLink("My Vehicle") { MyVehicleView() }
+                Text(backend.insufficientReason(for: trip) != nil ? "Insufficient recording data" : "Use the account and vehicle selected when this recording began. Older recordings remain available for inspection.").font(.subheadline).foregroundStyle(DS.secondary)
             } else {
                 Button("Get estimate") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             }
-            ConsumerBackendStatusView()
+            if backend.insufficientReason(for: trip) == nil { ConsumerBackendStatusView() }
         }
     }
 }

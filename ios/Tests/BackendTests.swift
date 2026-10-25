@@ -199,6 +199,36 @@ final class BackendStub: URLProtocol {
         BackendStub.handler = { _ in (409, Data("{\"error\":{\"code\":\"trip_not_scored\",\"message\":\"event_recording_incomplete\"}}".utf8)) }
         do { _ = try await progressClient.receipt(tripID: UUID()); throw BackendError.invalidInput("Expected unscored receipt") }
         catch let error as BackendError { try check(error.localizedDescription.contains("No estimate was produced") && error.localizedDescription.contains("event_recording_incomplete"), "unscored receipts retain the actual server reason without a fallback amount") }
+        // Even a driver credential marked demo must not auto-register a new owner for a genuine trip.
+        let frozenStore = MemoryCredentialStore()
+        let frozenOwner = UUID()
+        try frozenStore.save(.init(userID: frozenOwner, nickname: "Frozen owner", token: "frozen-unit-token", isDemoAccount: true))
+        let frozenClient = BackendAPIClient(mode: .remote(URL(string: "https://example.invalid")!), session: session, credentialStore: frozenStore)
+        var genuine = trip; genuine.source = "recorded"; genuine.is_demo = false
+        var frozenRequests: [String] = []
+        BackendStub.handler = { request in
+            frozenRequests.append(request.url!.path)
+            return (401, Data())
+        }
+        do { _ = try await frozenClient.upload(genuine, vehicle: vehicle); throw BackendError.invalidInput("Expected missing recording owner rejection") }
+        catch BackendError.invalidInput(let message) { try check(message.contains("recording-start") && frozenRequests.isEmpty, "genuine API uploads cannot omit the frozen starting owner") }
+        do { _ = try await frozenClient.upload(genuine, vehicle: vehicle, expectedOwnerID: UUID()); throw BackendError.invalidInput("Expected frozen owner rejection") }
+        catch BackendError.expiredSession { try check(frozenRequests.isEmpty, "different recording owner is rejected before vehicle PUT or trip POST") }
+        do { _ = try await frozenClient.upload(genuine, vehicle: vehicle, expectedOwnerID: frozenOwner); throw BackendError.invalidInput("Expected frozen PUT 401") }
+        catch BackendError.expiredSession { try check(frozenRequests == ["/users/me/vehicle"] && frozenStore.credential?.userID == frozenOwner, "vehicle PUT 401 cannot replace a genuine recording owner") }
+        frozenRequests = []
+        BackendStub.handler = { request in
+            frozenRequests.append(request.url!.path)
+            if request.url!.path == "/users/me/vehicle" { return (200, try APIJSON.encoder().encode(vehicle)) }
+            return (401, Data())
+        }
+        do { _ = try await frozenClient.upload(genuine, vehicle: vehicle, expectedOwnerID: frozenOwner); throw BackendError.invalidInput("Expected frozen POST 401") }
+        catch BackendError.expiredSession { try check(frozenRequests == ["/users/me/vehicle", "/trips"] && frozenStore.credential?.userID == frozenOwner, "trip POST 401 cannot register or resubmit under a new owner") }
+        frozenRequests = []
+        do { _ = try await frozenClient.receipt(tripID: genuine.client_trip_id, expectedOwnerID: UUID()); throw BackendError.invalidInput("Expected frozen receipt owner rejection") }
+        catch BackendError.expiredSession { try check(frozenRequests.isEmpty, "different recording owner cannot request its receipt") }
+        do { _ = try await frozenClient.receipt(tripID: genuine.client_trip_id, expectedOwnerID: frozenOwner); throw BackendError.invalidInput("Expected frozen receipt 401") }
+        catch BackendError.expiredSession { try check(frozenRequests.count == 1 && !frozenRequests.contains("/users") && frozenStore.credential?.userID == frozenOwner, "receipt 401 cannot replace a genuine recording owner") }
         print("\(passes) backend contract checks passed.")
     }
 }

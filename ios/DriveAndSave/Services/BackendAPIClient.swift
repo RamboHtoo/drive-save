@@ -65,11 +65,13 @@ actor BackendAPIClient {
     private func mockCatalog() throws -> [CatalogVehicle] {
         try ["catalog-mazda5", "catalog-cybertruck"].map { try BackendFixtures.load($0, as: CatalogVehicle.self) }
     }
-    func putVehicle(_ row: VehicleRow) async throws -> VehicleRow {
+    func putVehicle(_ row: VehicleRow, expectedOwnerID: UUID? = nil) async throws -> VehicleRow {
+        try checkOwner(expectedOwnerID)
         let data = try APIJSON.encoder().encode(row)
         guard (1...200).contains(row.count), data.count < 20_000 else { throw BackendError.invalidInput("Vehicle must be a complete JSON object with 1–200 fields under 20 KB.") }
         if case .mock = mode { selectedVehicle = row; return row }
-        let saved = try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "PUT", body: data))
+        let saved = try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "PUT", body: data, recover: expectedOwnerID == nil))
+        try checkOwner(expectedOwnerID)
         selectedVehicle = saved
         return saved
     }
@@ -77,11 +79,11 @@ actor BackendAPIClient {
         if case .mock = mode { guard let selectedVehicle else { throw BackendError.invalidInput("No vehicle selected.") }; return selectedVehicle }
         return try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "GET"))
     }
-    func upload(_ payload: APITripPayload, vehicle: VehicleRow) async throws -> APITripCreated {
+    func upload(_ payload: APITripPayload, vehicle: VehicleRow, expectedOwnerID: UUID? = nil) async throws -> APITripCreated {
         if case .remote = mode {
             guard payload.is_demo == demoOnly else { throw BackendError.invalidInput("Demo uploads require an isolated replay account; real uploads require the normal driver account.") }
         }
-        return try await uploadBody(payload, data: APIJSON.encoder().encode(payload), vehicle: vehicle)
+        return try await uploadBody(payload, data: APIJSON.encoder().encode(payload), vehicle: vehicle, expectedOwnerID: expectedOwnerID)
     }
     /// Calculation tests may only run through an isolated demo client, never the driver's client.
     func ensureCalculationIdentity(driverID: UUID) async throws {
@@ -96,12 +98,17 @@ actor BackendAPIClient {
         }
         return try await uploadBody(payload, data: data, vehicle: vehicle)
     }
-    private func uploadBody(_ payload: APITripPayload, data: Data, vehicle: VehicleRow) async throws -> APITripCreated {
+    private func uploadBody(_ payload: APITripPayload, data: Data, vehicle: VehicleRow, expectedOwnerID: UUID? = nil) async throws -> APITripCreated {
         try TripUploadBuilder.validate(payload)
         if !payload.is_demo && vehicle["supported"] == .bool(false) {
             throw BackendError.invalidInput("This vehicle is not supported for fuel estimates. Your trip remains on this iPhone.")
         }
-        _ = try await putVehicle(vehicle) // Must precede pricing, including after auth recovery.
+        guard payload.is_demo || expectedOwnerID != nil else {
+            throw BackendError.invalidInput("Genuine uploads require the recording-start account identity.")
+        }
+        try checkOwner(expectedOwnerID)
+        _ = try await putVehicle(vehicle, expectedOwnerID: expectedOwnerID)
+        try checkOwner(expectedOwnerID) // Actor may reenter while the PUT is in flight.
         if case .mock = mode {
             if let previous = mockUploads[payload.client_trip_id] {
                 guard previous.0 == data else { throw BackendError.server(409, nil) }
@@ -114,7 +121,9 @@ actor BackendAPIClient {
             mockUploads[payload.client_trip_id] = (data, result, receipt)
             return result
         }
-        return try APIJSON.decoder().decode(APITripCreated.self, from: await request("trips", method: "POST", body: data))
+        let created = try APIJSON.decoder().decode(APITripCreated.self, from: await request("trips", method: "POST", body: data, recover: expectedOwnerID == nil))
+        try checkOwner(expectedOwnerID)
+        return created
     }
     func progress() async throws -> APIProgress {
         guard let owner = try identity()?.userID else { throw BackendError.expiredSession }
@@ -124,12 +133,18 @@ actor BackendAPIClient {
         guard progress.user_id == owner else { throw BackendError.invalidResponse }
         return progress
     }
-    func receipt(tripID: UUID) async throws -> APIReceipt {
+    private func checkOwner(_ expected: UUID?) throws {
+        if let expected, try identity()?.userID != expected { throw BackendError.expiredSession }
+    }
+    func receipt(tripID: UUID, expectedOwnerID: UUID? = nil) async throws -> APIReceipt {
+        try checkOwner(expectedOwnerID)
         if case .mock = mode {
             guard let found = mockUploads.values.first(where: { $0.1.trip_id == tripID }) else { throw BackendError.server(404, nil) }
             return found.2
         }
-        return try APIJSON.decoder().decode(APIReceipt.self, from: await request("trips/\(tripID)/receipt", method: "GET"))
+        let receipt = try APIJSON.decoder().decode(APIReceipt.self, from: await request("trips/\(tripID)/receipt", method: "GET", recover: expectedOwnerID == nil))
+        try checkOwner(expectedOwnerID)
+        return receipt
     }
     func createLeague(name: String) async throws -> APILeague {
         guard !demoOnly else { throw BackendError.invalidInput("Isolated replay accounts cannot create or join competition leagues.") }

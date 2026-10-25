@@ -8,9 +8,18 @@ enum APIJSON {
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
             let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            formatter.formatOptions = [.withInternetDateTime]
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
-            try container.encode(formatter.string(from: date))
+            // Python's datetime contract supports microseconds. ISO8601DateFormatter's
+            // fractional option reduces observations to millisecond precision.
+            let interval = date.timeIntervalSince1970
+            guard interval.isFinite else { throw EncodingError.invalidValue(date, .init(codingPath: encoder.codingPath, debugDescription: "Non-finite timestamp")) }
+            var seconds = floor(interval)
+            var micros = Int(((interval - seconds) * 1_000_000).rounded())
+            if micros == 1_000_000 { seconds += 1; micros = 0 }
+            let base = formatter.string(from: Date(timeIntervalSince1970: seconds)).dropLast()
+            let fraction = micros % 1000 == 0 ? String(format: ".%03dZ", micros / 1000) : String(format: ".%06dZ", micros)
+            try container.encode(String(base) + fraction)
         }
         return encoder
     }
@@ -18,6 +27,7 @@ enum APIJSON {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
+            if let date = try? Date(text, strategy: .iso8601) { return date }
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             if let date = formatter.date(from: text) { return date }

@@ -3,7 +3,7 @@ import Foundation
 enum TripUploadBuilder {
     static func payload(for trip: Trip) throws -> APITripPayload {
         guard !trip.isWalkingTest else { throw BackendError.invalidInput("Walking Tests cannot be uploaded to the driving API.") }
-        guard let clientID = trip.clientTripID, let recording = trip.recording else { throw BackendError.invalidInput("This older trip lacks a recording-start client ID. Record a new trip or use the labeled contract replay.") }
+        guard let clientID = trip.clientTripID, let recording = trip.recording else { throw BackendError.invalidInput("This older trip lacks a recording-start client ID. Record a new trip or use Test Calculation in Developer Mode.") }
         guard !trip.measurementsIncomplete else { throw BackendError.invalidInput("This recording has incomplete measurements. Keep it locally; it is not eligible for upload.") }
         guard let samples = recording.speedSamples else { throw BackendError.invalidInput("This older recording has no timestamped GPS speed accuracy/sequence data. Upload is unsupported.") }
         var events: [APITripEvent] = []
@@ -22,9 +22,26 @@ enum TripUploadBuilder {
             events.append(.init(event_id: event.id, type: kind, ts: event.timestamp, detector_version: version, peak_g: peak, speed_before_mph: beforeSpeed * 2.2369362921, speed_after_mph: afterSpeed * 2.2369362921, duration_s: duration, heading_change_deg: heading))
         }
         let duration = recording.endedAt.timeIntervalSince(trip.date)
-        let result = APITripPayload(client_trip_id: clientID, started_at: trip.date, ended_at: recording.endedAt, distance_mi: trip.distanceMiles, avg_speed_mph: trip.distanceMiles / (duration / 3600), source: trip.source == .simulated ? "replayed" : "recorded", is_demo: trip.source == .simulated, events: events, speed_samples: samples)
+        let result = APITripPayload(client_trip_id: clientID, started_at: trip.date, ended_at: recording.endedAt, distance_mi: trip.distanceMiles, avg_speed_mph: trip.distanceMiles / (duration / 3600), source: trip.source == .simulated ? "replayed" : "recorded", is_demo: trip.source == .simulated, events: events, speed_samples: samples, events_complete: recording.eventsComplete ?? false, detector_version: recording.detectorVersion)
         try validate(result)
         return result
+    }
+    /// Mirrors the model's strict endpoints without trimming the interval or adding readings.
+    static func scoringIssue(for trip: Trip) -> String? {
+        guard let recording = trip.recording else { return "Missing recording details" }
+        let valid = (recording.speedSamples ?? []).filter {
+            guard let speed = $0.speed_mps, let accuracy = $0.speed_accuracy_mps else { return false }
+            return speed.isFinite && (0...53.6448).contains(speed) && accuracy.isFinite && (0...2).contains(accuracy)
+        }.sorted { $0.ts < $1.ts }
+        guard let first = valid.first, let last = valid.last,
+              abs(first.ts.timeIntervalSince(trip.date)) <= 0.000001,
+              abs(last.ts.timeIntervalSince(recording.endedAt)) <= 0.000001 else {
+            return "missing_boundary_speed: Backend requires valid GPS speed at both button-tap boundaries within 1 microsecond. No readings were added or timestamps changed."
+        }
+        guard recording.eventsComplete == true else { return "event_recording_incomplete: Detector coverage does not span the entire scoring interval (or is unknown for an older recording)." }
+        guard let version = recording.detectorVersion, !version.isEmpty else { return "missing_detector_version" }
+        guard recording.events.allSatisfy({ $0.detectorVersion == version }) else { return "detector_version_mismatch" }
+        return nil
     }
     static func validate(_ payload: APITripPayload) throws {
         func require(_ condition: Bool, _ message: String) throws { if !condition { throw BackendError.invalidInput(message) } }

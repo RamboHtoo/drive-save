@@ -20,6 +20,7 @@ struct Trip: Identifiable, Codable, Hashable {
     // Optional for compatibility with existing saved trips; missing values mean driving.
     var activity: TripActivity? = nil
     var clientTripID: UUID? = nil
+    var recordingContext: RecordingContext? = nil
     var isWalkingTest: Bool { activity == .walkingTest }
     var displayTitle: String { isWalkingTest ? "Walking Test" : title }
     var isDriving: Bool { !isWalkingTest }

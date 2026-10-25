@@ -43,6 +43,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
     private var softwareSimulatedGPS = false
     private var startedAt: Date?
     private var startedUptime = 0.0
+    private var endedAt: Date?
+    private var endedUptime: Double?
+    private var recordingContext: RecordingContext?
+    private var detectorCoverage = DetectorCoverage(startedUptime: 0)
     private var locationWasUnavailable = false
     private var hasMotion = false
     private var demoTick = 0
@@ -150,12 +154,17 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         startMotion()
     }
 
-    func start() {
+    func start(context: RecordingContext? = nil) {
         guard canStart else { return }
         calibrationRequested = false
         if !isCalibrated { motion.stopDeviceMotionUpdates() }
         clientTripID = UUID(); speedSamples = []; softwareSimulatedGPS = false
         startedAt = Date(); startedUptime = ProcessInfo.processInfo.systemUptime
+        endedAt = nil; endedUptime = nil; recordingContext = context
+        detectorCoverage = DetectorCoverage(startedUptime: startedUptime)
+        if mode != .device || !isCalibrated || !hasMotion {
+            detectorCoverage.invalidate("Calibrated device detector unavailable at start")
+        }
         elapsedSeconds = 0; distanceMiles = 0; events = []; motionSamples = []; gpsPoints = []
         interruptions = []; interruption = nil; lastLocation = nil; distanceAvailable = false
         lastMotionUptime = nil
@@ -195,6 +204,10 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
 
     private func consume(_ sample: CMDeviceMotion) {
         guard mode == .device, isRecording || calibrationRequested else { return }
+        // Core Motion timestamps are monotonic uptime. Map the observed instant to our start
+        // clock anchor; callback delivery time is not the sensor observation time.
+        if isRecording && sample.timestamp < startedUptime { return }
+        let observedAt = isRecording ? (startedAt ?? Date()).addingTimeInterval(sample.timestamp - startedUptime) : Date()
         let acceleration = Vector3(x: sample.userAcceleration.x, y: sample.userAcceleration.y, z: sample.userAcceleration.z)
         let rotation = Vector3(x: sample.rotationRate.x, y: sample.rotationRate.y, z: sample.rotationRate.z)
         let gravity = Vector3(x: sample.gravity.x, y: sample.gravity.y, z: sample.gravity.z)
@@ -242,12 +255,16 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
                 forwardValue = filtered.dot(forward); lateralValue = filtered.dot(lateral)
                 // Require recent GPS speed evidence to reduce stationary phone-motion false positives.
                 if let lastLocation, lastLocation.speed >= 2, abs(lastLocation.timestamp.timeIntervalSinceNow) < 5 {
-                    events += detector.update(forward: forwardValue ?? 0, lateral: lateralValue ?? 0, uptime: sample.timestamp, date: Date())
-                } else { detector = CandidateEventDetector(configuration: configuration) }
+                    events += detector.update(forward: forwardValue ?? 0, lateral: lateralValue ?? 0, uptime: sample.timestamp, date: observedAt)
+                    detectorCoverage.observe(uptime: sample.timestamp)
+                } else {
+                    detectorCoverage.invalidate("Detector paused without driving-speed GPS evidence")
+                    detector = CandidateEventDetector(configuration: configuration)
+                }
                 lastMotionUptime = sample.timestamp
             }
         }
-        let value = MotionSample(timestamp: Date(), uptime: sample.timestamp, userAcceleration: acceleration, rotationRate: rotation, attitude: attitude, forwardAcceleration: forwardValue, lateralAcceleration: lateralValue)
+        let value = MotionSample(timestamp: observedAt, uptime: sample.timestamp, userAcceleration: acceleration, rotationRate: rotation, attitude: attitude, forwardAcceleration: forwardValue, lateralAcceleration: lateralValue)
         latestMotion = value
         if isRecording { motionSamples.append(value) }
     }
@@ -349,23 +366,33 @@ final class TripRecordingService: NSObject, ObservableObject, @preconcurrency CL
         guard isRecording else { return }
         tick()
         noteInterruption(reason)
+        freezeEnd()
         isRecording = false
         stopHardware()
     }
 
     private func noteInterruption(_ message: String) {
+        detectorCoverage.invalidate(message)
         interruption = message
         if !interruptions.contains(message) { interruptions.append(message) }
+    }
+
+    private func freezeEnd() {
+        guard endedAt == nil else { return }
+        endedAt = Date()
+        endedUptime = ProcessInfo.processInfo.systemUptime
+        elapsedSeconds = max(0, (endedUptime ?? startedUptime) - startedUptime)
     }
 
     func finish() -> Trip? {
         guard let startedAt else { return nil }
         if isRecording { tick() }
+        freezeEnd()
         let finalDetectionStatus = detectionStatus
         isRecording = false
         stopHardware()
-        let details = RecordingDetails(endedAt: max(Date(), startedAt.addingTimeInterval(elapsedSeconds)), elapsedSeconds: elapsedSeconds, distanceAvailable: distanceAvailable, distanceIsPartial: locationWasUnavailable, motionAvailable: hasMotion && motionSamples.contains { $0.forwardAcceleration != nil }, calibrationDescription: mode == .walking ? "Walking Test: real GPS only. No calibration, driving detection, fuel estimate, or crew scoring." : "Stationary flat mount calibration; phone top edge manually aligned with vehicle front. Candidate events require recent GPS speed ≥ 2 m/s. Thresholds are provisional.", events: events, motionSamples: motionSamples, gpsPoints: gpsPoints, interruptions: interruptions, gpsAccuracyMeters: gpsAccuracyMeters, detectionStatus: finalDetectionStatus, calibrationValidAtEnd: mode == .device ? isCalibrated : nil, measurementsIncomplete: measurementsIncomplete, speedSamples: speedSamples)
-        return Trip(id: UUID(), title: mode == .walking ? "Walking Test" : mode == .simulator ? "Simulator test drive" : "Recorded drive", date: startedAt, distanceMiles: distanceMiles, durationMinutes: Int(elapsedSeconds / 60), harshBraking: events.filter { $0.kind == .harshBraking }.count, rapidAcceleration: events.filter { $0.kind == .rapidAcceleration }.count, mpg: 28, fuelPrice: 3.65, modeledExcessGallons: 0, source: mode == .simulator || softwareSimulatedGPS ? .simulated : .measured, recording: details, activity: mode == .walking ? .walkingTest : .driving, clientTripID: clientTripID)
+        let details = RecordingDetails(endedAt: endedAt ?? startedAt, elapsedSeconds: elapsedSeconds, distanceAvailable: distanceAvailable, distanceIsPartial: locationWasUnavailable, motionAvailable: hasMotion && motionSamples.contains { $0.forwardAcceleration != nil }, calibrationDescription: mode == .walking ? "Walking Test: real GPS only. No calibration, driving detection, fuel estimate, or crew scoring." : "Stationary flat mount calibration; phone top edge manually aligned with vehicle front. Candidate events require recent GPS speed ≥ 2 m/s. Thresholds are provisional.", events: events, motionSamples: motionSamples, gpsPoints: gpsPoints, interruptions: interruptions, gpsAccuracyMeters: gpsAccuracyMeters, detectionStatus: finalDetectionStatus, calibrationValidAtEnd: mode == .device ? isCalibrated : nil, measurementsIncomplete: measurementsIncomplete, speedSamples: speedSamples, eventsComplete: mode == .device && detectorCoverage.complete(through: endedUptime ?? startedUptime), detectorVersion: mode == .device ? CandidateEventDetector.version : nil, detectorCoverage: detectorCoverage)
+        return Trip(id: UUID(), title: mode == .walking ? "Walking Test" : mode == .simulator ? "Simulator test drive" : "Recorded drive", date: startedAt, distanceMiles: distanceMiles, durationMinutes: Int(elapsedSeconds / 60), harshBraking: events.filter { $0.kind == .harshBraking }.count, rapidAcceleration: events.filter { $0.kind == .rapidAcceleration }.count, mpg: 28, fuelPrice: 3.65, modeledExcessGallons: 0, source: mode == .simulator || softwareSimulatedGPS ? .simulated : .measured, recording: details, activity: mode == .walking ? .walkingTest : .driving, clientTripID: clientTripID, recordingContext: recordingContext)
     }
 
     func stopHardware() {

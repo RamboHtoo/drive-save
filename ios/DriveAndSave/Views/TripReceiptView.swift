@@ -22,8 +22,8 @@ struct TripReceiptView: View {
                 ReceiptPaper {
                     Text("Estimated fuel impact").font(.headline)
                     if trip.hasEstimate { FinancialNumber(value: trip.avoidableCost.dollars, ink: DS.background) }
-                    else { Text(trip.isWalkingTest ? "No fuel estimate" : trip.isIncompleteRecording ? "Incomplete recording" : "Estimate pending").font(.largeTitle.bold()).fontWidth(.condensed).accessibilityIdentifier("receiptEstimateState") }
-                    Text("Vehicle used: Not recorded").font(.subheadline)
+                    else { Text(trip.isWalkingTest ? "No fuel estimate" : trip.isIncompleteRecording ? "Incomplete recording" : backend.insufficientReason(for: trip) != nil ? "Insufficient recording data" : "Estimate pending").font(.largeTitle.bold()).fontWidth(.condensed).accessibilityIdentifier("receiptEstimateState") }
+                    Text("Vehicle recorded: \(trip.recordingContext?.vehicle?.vehicleTitle ?? "Not recorded")").font(.subheadline)
                 }
                 if trip.hasEstimate {
                     ReceiptLedgerLine(label: "Baseline fuel", value: trip.baselineFuelCost.dollars)
@@ -85,6 +85,17 @@ struct TripReceiptAdvancedView: View {
                 }
                 if let recording = trip.recording {
                     Text("Ended: \(recording.endedAt.formatted())")
+                    Text("Events complete: \(recording.eventsComplete.map(String.init) ?? "Unknown (legacy)")")
+                    Text("Detector: \(recording.detectorVersion ?? "Unknown (legacy)")")
+                    if let coverage = recording.detectorCoverage {
+                        Text("Detector coverage: \(coverage.firstObservation.map(String.init(describing:)) ?? "none") to \(coverage.lastObservation.map(String.init(describing:)) ?? "none") uptime")
+                        ForEach(coverage.failures, id: \.self) { Text($0) }
+                    }
+                    if let context = trip.recordingContext {
+                        Text("Recording owner: \(context.ownerID.uuidString)")
+                        Text("Recording account scope: \(context.accountScope)")
+                        Text("Recording vehicle: \(context.vehicle?.vehicleTitle ?? "Not selected")")
+                    }
                     if let accuracy = recording.gpsAccuracyMeters { Text("Last GPS accuracy: ±\(accuracy, specifier: "%.0f") m") }
                     if trip.isWalkingTest { Text("Driving detection disabled · no calibration needed") }
                     else {
@@ -94,6 +105,7 @@ struct TripReceiptAdvancedView: View {
                     }
                 }
             }.font(.caption)
+            if let reason = backend.insufficientReason(for: trip) { Text(reason).font(.caption).textSelection(.enabled) }
             if let reason = backend.unsupportedReason(for: trip) { Text(reason).font(.caption) }
             else {
                 Button("Upload / retry & fetch receipt") { Task { await backend.upload(trip: trip) } }

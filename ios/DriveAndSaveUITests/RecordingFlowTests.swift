@@ -54,7 +54,7 @@ final class RecordingFlowTests: XCTestCase {
         if !stop.isHittable { app.swipeUp() }
         stop.tap()
         XCTAssertTrue(app.staticTexts["Simulator test drive"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Estimate pending"].exists)
+        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Insufficient recording data")
         XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].exists)
         XCTAssertFalse(app.otherElements["tripTimeline"].exists)
         app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch.tap()
@@ -68,7 +68,7 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Simulator test drive"].firstMatch.exists)
         app.staticTexts["Simulator test drive"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Estimate pending", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
         app.openMain("Leagues")
         XCTAssertTrue(app.staticTexts["leagueHeadline"].waitForExistence(timeout: 5))
         app.openMain("Home")
@@ -91,7 +91,7 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recording ended"].waitForExistence(timeout: 5))
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Estimate pending", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
     }
 
     @MainActor
@@ -111,7 +111,7 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recording ended"].waitForExistence(timeout: 5))
         app.buttons["stopTrip"].tap()
         XCTAssertTrue(app.staticTexts["receiptEstimateState"].waitForExistence(timeout: 5))
-        XCTAssertTrue(["Estimate pending", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
+        XCTAssertTrue(["Insufficient recording data", "Incomplete recording"].contains(app.staticTexts["receiptEstimateState"].label))
     }
 
     @MainActor
@@ -131,6 +131,41 @@ final class RecordingFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Local recording deleted"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["openReceipt"].exists)
         XCTAssertFalse(app.staticTexts["Trip saved on this iPhone"].exists)
+    }
+
+    @MainActor
+    func testRecordingKeepsStartingVehicleAfterProfileChangeAndRelaunch() throws {
+        let app = XCUIApplication(); app.launchOffline()
+        func selectVehicle(brand: String, model: String, year: String) {
+            app.buttons["openProfile"].tap()
+            app.scrollFullyIntoView(app.buttons["myVehicle"]); app.buttons["myVehicle"].tap()
+            app.scrollFullyIntoView(app.buttons["chooseVehicle"]); app.buttons["chooseVehicle"].tap()
+            app.buttons["selectVehicleBrand"].tap(); app.buttons["vehicleOption-" + brand].tap()
+            app.buttons["selectVehicleModel"].tap(); app.buttons["vehicleOption-" + model].tap()
+            app.buttons["selectVehicleYear"].tap(); app.buttons["vehicleOption-" + year].tap()
+            app.scrollFullyIntoView(app.buttons["saveCatalogVehicle"]); app.buttons["saveCatalogVehicle"].tap()
+            XCTAssertTrue(app.navigationBars["My Vehicle"].waitForExistence(timeout: 5))
+            app.openMain("Home")
+        }
+        selectVehicle(brand: "Mazda", model: "MAZDA5", year: "2012")
+        app.buttons["startTrip"].tap(); app.segmentedControls.buttons["Demo Drive"].tap()
+        app.confirmParkedMount()
+        app.scrollFullyIntoView(app.buttons["beginRecording"]); app.buttons["beginRecording"].tap()
+        XCTAssertTrue(app.buttons["stopTrip"].waitForExistence(timeout: 5))
+        let elapsed = app.staticTexts["elapsedTime"]
+        expectation(for: NSPredicate { _, _ in (elapsed.label.components(separatedBy: ":").last.flatMap(Int.init) ?? 0) >= 2 }, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        app.scrollFullyIntoView(app.buttons["stopTrip"]); app.buttons["stopTrip"].tap()
+        XCTAssertTrue(app.staticTexts["Vehicle recorded: 2012 Mazda MAZDA5"].waitForExistence(timeout: 5))
+        app.openMain("Home")
+        selectVehicle(brand: "Tesla", model: "Cybertruck AWD", year: "2026")
+        app.terminate(); app.launchOffline()
+        app.openMain("History")
+        let saved = app.buttons.matching(identifier: "historyTrip-Simulator test drive").firstMatch
+        app.scrollFullyIntoView(saved); saved.tap()
+        XCTAssertTrue(app.staticTexts["Vehicle recorded: 2012 Mazda MAZDA5"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Vehicle recorded: 2026 Tesla Cybertruck AWD"].exists)
+        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Insufficient recording data")
     }
 
     @MainActor

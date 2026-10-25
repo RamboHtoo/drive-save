@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TripRecordingView: View {
+    @EnvironmentObject private var backend: BackendViewModel
     @EnvironmentObject private var model: AppViewModel
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var recorder = TripRecordingService()
@@ -98,7 +99,7 @@ struct TripRecordingView: View {
                 }
             }
             Button {
-                recorder.start()
+                recorder.start(context: backend.recordingContext())
                 began = recorder.isRecording
             } label: {
                 Label(walkingMode ? "Start Walking Test" : simulatorMode ? "Start simulated trip" : "Start recording", systemImage: "record.circle")
