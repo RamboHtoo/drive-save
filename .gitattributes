@@ -1,0 +1,2 @@
+# Preserve official EPA source bytes for provenance SHA-256 checks, including CRLF.
+drive_save_model/data/*_epa.txt -text -whitespace

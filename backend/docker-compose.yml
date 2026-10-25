@@ -1,0 +1,35 @@
+# Production stack: the API behind Caddy, which gets HTTPS certificates automatically.
+# Run from this folder:  docker compose up -d --build
+# Settings come from backend/.env (copy .env.example).
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    restart: unless-stopped
+    # Not published to the internet; only Caddy talks to it.
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in backend/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Keeps certificates across restarts, so we don't hit Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

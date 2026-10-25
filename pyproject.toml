@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drive-save-model"
+version = "0.2.0"
+description = "Experimental vehicle-specific fuel estimates based on driving events"
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy==2.5.4"]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+backend = ["asyncpg==0.31.0"]
+
+[project.scripts]
+drive-save = "drive_save_model.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["drive_save_model*"]
+
+[tool.setuptools.package-data]
+drive_save_model = ["data/*.json", "data/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/model"]

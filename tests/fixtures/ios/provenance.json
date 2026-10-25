@@ -1,0 +1,16 @@
+{
+  "ios_commit": "99c07bad52a38137255d004e24993501223c3f9a",
+  "source_sha256": {
+    "ios/DriveAndSave/Models/BackendModels.swift": "9f09fb3a799e69a4f47979afd138103d05dd2a1ddd9f8d2dc61fec6b911f502d",
+    "ios/DriveAndSave/Models/DrivingModels.swift": "840a12a1577a811ee92da7aefaa7af9f530c22c367ab8d4f5b9a09a36b47d9de",
+    "ios/DriveAndSave/Models/RecordingModels.swift": "d84bb9efaa3584237bfd8d389fd11531ba33a3bcbceea0646845233e6739f5e1",
+    "ios/DriveAndSave/Services/TripUploadBuilder.swift": "ad02a591a2afefc7d199516c9e90b08df2e2e30ad20024952d70e75533b1315b"
+  },
+  "generator_sha256": "447083bfbe20a8b29e9d7c5a4d36ca3686d7675ab3ba74d39e8b49c17121f6fd",
+  "payload_sha256": "d2abe3d17228299f6e783660d1c22a8058007aef79c59f4b3abf609bbf15a3b4",
+  "provenance": "Actual iOS upload builder and encoder; synthetic observations executed on macOS.",
+  "real_device_recording": false,
+  "session_seconds": 301,
+  "first_gps_offset_s": 0.625,
+  "last_gps_offset_s": 300.625
+}

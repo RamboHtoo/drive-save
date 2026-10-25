@@ -1,0 +1,41 @@
+{
+  "assets": [
+    {
+      "file": "fueleconomy_31284.json",
+      "source_url": "https://www.fueleconomy.gov/ws/rest/vehicle/31284",
+      "retrieved_at": "2026-10-24T22:54:06.422959+00:00",
+      "sha256": "3988b24807586b1d12ebcb99985b52348e42fa92311829cb7d1d8536100b38dc",
+      "source_sha256": "3988b24807586b1d12ebcb99985b52348e42fa92311829cb7d1d8536100b38dc"
+    },
+    {
+      "file": "epa_2012_mazda5.json",
+      "source_url": "https://www.epa.gov/sites/default/files/2016-07/12tstcar.csv",
+      "retrieved_at": "2026-10-24T22:54:06.422959+00:00",
+      "sha256": "14b9a996f5b7327471c4b471304ed56164f2a5a3157912abd66e526fdd2c3195",
+      "source_sha256": "b4167656b3b1cac2d2ef9bbe8ef852eb8dcb762d40688c5a9c9ec22701bcf697"
+    },
+    {
+      "file": "udds_epa.txt",
+      "source_url": "https://www.epa.gov/sites/default/files/2015-10/uddscol.txt",
+      "retrieved_at": "2026-10-24T22:54:06.422959+00:00",
+      "sha256": "cc9f3edf2f0626976a6552d9f5c88867e1805ed3f321df9ec943a3e0353687b6",
+      "source_sha256": "cc9f3edf2f0626976a6552d9f5c88867e1805ed3f321df9ec943a3e0353687b6"
+    },
+    {
+      "file": "hwfet_epa.txt",
+      "source_url": "https://www.epa.gov/sites/default/files/2015-10/hwycol.txt",
+      "retrieved_at": "2026-10-24T22:54:06.422959+00:00",
+      "sha256": "e48e278a40312dfe84d31b5f448b601e7046c72487a6a20d3db1d4f85fb3e10a",
+      "source_sha256": "e48e278a40312dfe84d31b5f448b601e7046c72487a6a20d3db1d4f85fb3e10a"
+    },
+    {
+      "file": "us06_epa.txt",
+      "source_url": "https://www.epa.gov/system/files/other-files/2025-03/us06col.txt",
+      "retrieved_at": "2026-10-24T22:54:06.422959+00:00",
+      "sha256": "84e9d8cc16fcd4ee3c30c3880f333eb25b61352e56f24e453411a7245c725ad2",
+      "source_sha256": "84e9d8cc16fcd4ee3c30c3880f333eb25b61352e56f24e453411a7245c725ad2"
+    }
+  ],
+  "independent_validation": "pending",
+  "calibration_applied": false
+}
