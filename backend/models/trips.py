@@ -135,6 +135,10 @@ class Receipt(BaseModel):
     avoidable_cost_usd: float = Field(description="Avoidable cost of the trip: its priced events plus any driving above 65 mph")
     high_speed_cost_usd: float | None = Field(default=None, description="The part of avoidable_cost_usd from driving above 65 mph")
     cost_model: str = Field(description="Version of the model that produced the amounts")
+    vehicle: str | None = Field(
+        default=None,
+        description="The car the trip was priced as: the driver's car from the vehicle list, or the model's 2012 Mazda5 when they have none it supports",
+    )
     label: str | None = Field(default=None, description="Wording to show with the amounts")
     assumptions: list[Assumption] = Field(description="Every numeric constant and data source the model used")
     notes: list[str] = Field(default_factory=list, description="Assumptions that aren't numbers, such as the road conditions")

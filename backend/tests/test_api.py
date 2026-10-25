@@ -611,14 +611,82 @@ def test_cost_model_input_without_optional_event_fields(client, model_inputs):
     assert all(e.duration_s is None and e.mean_accel_g is None and e.heading_change_deg is None for e in inputs.events)
 
 
-def test_every_trip_is_priced_as_the_models_car(client):
+MAZDA5_REFERENCE = "2012 Mazda5 2.5L automatic (5-speed), FWD"
+
+
+def test_a_car_sent_as_free_form_data_is_priced_as_the_mazda5(client):
     _, headers = new_user(client)
     client.put("/users/me/vehicle", json={"make": "TOYOTA", "model": "PRIUS"}, headers=headers)
     trip_id = upload(client, headers).json()["trip_id"]
 
     assert client.get(f"/trips/{trip_id}/cost-input", headers=headers).json()["vehicle"] == cost_model.SCORING_CONFIG["vehicle_profile"]
-    # The driver's own car stays on file for models that support more cars.
+    assert client.get(f"/trips/{trip_id}/receipt", headers=headers).json()["vehicle"] == MAZDA5_REFERENCE
+    # The driver's own data stays on file as sent.
     assert client.get("/users/me/vehicle", headers=headers).json() == {"make": "TOYOTA", "model": "PRIUS"}
+
+
+def sign_up(client, nickname, car):
+    res = client.post("/users", json={"nickname": nickname, "vehicle": car})
+    assert res.status_code == 201
+    return res.json()["vehicle"], {"Authorization": f"Bearer {res.json()['token']}"}
+
+
+CAMRY_2020 = {"make": "Toyota", "model": "CAMRY", "year": 2020}
+
+
+def test_trips_are_priced_as_the_drivers_car(client, vehicle_list):
+    _, mazda = new_user(client, "mazda")
+    camry, toyota = sign_up(client, "camry", CAMRY_2020)
+    mazda_trip, camry_trip = (upload(client, headers, fresh_trip()).json()["trip_id"] for headers in (mazda, toyota))  # the same drive
+
+    receipt = client.get(f"/trips/{camry_trip}/receipt", headers=toyota).json()
+    assert receipt["vehicle"] == "2020 Toyota CAMRY"
+    shown = {a["key"]: a for a in receipt["assumptions"]}
+    for parameter in camry["parameters"]:  # the car's own values, with the EPA list as their source
+        assert shown[parameter["key"]]["value"] == parameter["value"]
+        assert shown[parameter["key"]]["source_url"] == cost_model.EPA_TEST_CARS_URL
+    model_input = client.get(f"/trips/{camry_trip}/cost-input", headers=toyota).json()["vehicle"]
+    assert model_input["name"] == "2020 Toyota CAMRY" and model_input["parameters"]["idle_rate"] == shown["idle_rate"]["value"]
+
+    # Same trip, different car: different amounts, and each car has its own configuration (and baseline).
+    assert client.get(f"/trips/{mazda_trip}/receipt", headers=mazda).json()["vehicle"] == MAZDA5_REFERENCE
+    assert trip_total(camry_trip) != pytest.approx(trip_total(mazda_trip), rel=1e-3)
+    assert query("SELECT count(*) FROM scoring_configs")[0]["count"] == 2
+
+
+def test_a_diesel_car_is_priced_at_the_diesel_price(client, vehicle_list):
+    car, headers = sign_up(client, "ram", {"make": "Ram", "model": "1500 EcoDiesel29 4x2", "year": 2016})
+    assert car["specs"]["fuel_type"] == "diesel"
+    trip_id = upload(client, headers, fresh_trip()).json()["trip_id"]
+
+    shown = {a["key"]: a for a in client.get(f"/trips/{trip_id}/receipt", headers=headers).json()["assumptions"]}
+    assert "gas_price" not in shown
+    diesel = cost_model.US_AVERAGE_DIESEL_PRICE
+    assert (shown["diesel_price"]["value"], shown["diesel_price"]["source_url"]) == (diesel.value, diesel.source_url)
+    assert client.get(f"/trips/{trip_id}/cost-input", headers=headers).json()["fuel_price"]["value"] == diesel.value
+
+
+def test_a_car_the_model_cant_describe_is_priced_as_the_mazda5(client, vehicle_list):
+    tesla = client.get("/vehicles/models", params={"make": "Tesla"}).json()["models"][0]
+    year = client.get("/vehicles/years", params={"make": "Tesla", "model": tesla}).json()["years"][0]
+    car, headers = sign_up(client, "tess", {"make": "Tesla", "model": tesla, "year": year})
+    assert car["supported"] is False
+    trip_id = upload(client, headers, fresh_trip()).json()["trip_id"]
+    assert client.get(f"/trips/{trip_id}/receipt", headers=headers).json()["vehicle"] == MAZDA5_REFERENCE
+
+
+def test_drivers_with_different_cars_rank_on_one_leaderboard(client, vehicle_list):
+    _, mazda = new_user(client, "mazda")
+    crew = client.post("/crews", json={"name": "Mixed"}, headers=mazda).json()
+    _, camry = sign_up(client, "camry", CAMRY_2020)
+    client.post(f"/crews/{crew['crew_id']}/join", json={"join_code": crew["join_code"]}, headers=camry)
+    for headers in (mazda, camry):
+        for _ in range(3):
+            upload(client, headers, fresh_trip())
+        upload(client, headers, fresh_trip(events=1))  # after the baseline, only the brake: both improve
+    board = client.get("/leaderboard", headers=camry).json()
+    assert {s["nickname"]: (s["state"], s["trips_counted"]) for s in board["standings"]} == {"mazda": ("ready", 1), "camry": ("ready", 1)}
+    assert all(s["improvement_pct"] > 0 for s in board["standings"])
 
 
 def test_cost_input_endpoint_matches_model_input_and_is_owner_only(client, model_inputs):

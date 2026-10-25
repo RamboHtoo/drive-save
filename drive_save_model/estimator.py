@@ -1,4 +1,8 @@
-"""Offline Mazda5 scenario estimates. Backend supplies trusted configuration."""
+"""Offline Mazda5 scenario estimates. Backend supplies trusted configuration.
+
+Another car can be priced with the same equations when the backend supplies its
+profile with all of its own parameters (physics.DEFAULT_PARAMETERS keys).
+"""
 
 import hashlib
 import json
@@ -6,8 +10,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 import numpy as np
 
-from .physics import (DATA, G, MPH_TO_MPS, LBF_TO_N, JOULES_PER_GALLON,
-                      brake_scenario, acceleration_scenario, high_speed_scenario)
+from .physics import (DATA, DEFAULT_PARAMETERS, G, MPH_TO_MPS, LBF_TO_N,
+                      brake_scenario, acceleration_scenario, high_speed_scenario, parameters)
 from .trace import TraceError, finite_number, prepare_trace, timestamp
 
 MODEL_VERSION = "notion-mazda5-2012-auto-v1"
@@ -16,7 +20,7 @@ NOTION_SOURCE = "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1
 
 
 def reference_profile():
-    """Compatibility name; returns the sole supported, identified vehicle profile."""
+    """The model's own car, the 2012 Mazda5, with the Notion parameters."""
     vehicle = json.loads((DATA / "fueleconomy_31284.json").read_text())
     records = json.loads((DATA / "epa_2012_mazda5.json").read_text())
     row = next(r for r in records if r["Test Category"] == "HWY")
@@ -40,7 +44,8 @@ def reference_profile():
     }
 
 
-def scoring_config(price_usd_per_gal, *, price_as_of, price_source_url=None):
+def scoring_config(price_usd_per_gal, *, price_as_of, price_source_url=None, vehicle_profile=None):
+    """vehicle_profile defaults to the Mazda5; another car's parameters replace the Notion values."""
     from decimal import Decimal
     from datetime import date
     if not finite_number(price_usd_per_gal) or not 0 <= price_usd_per_gal <= 100:
@@ -51,38 +56,56 @@ def scoring_config(price_usd_per_gal, *, price_as_of, price_source_url=None):
     if price_source_url is not None and not isinstance(price_source_url, str):
         raise ValueError("price source must be text or null")
     date.fromisoformat(price_as_of)
+    profile = reference_profile() if vehicle_profile is None else vehicle_profile
+    p, own = parameters(profile), "parameters" in profile
+    car_source = profile.get("parameters_source_url") if own else NOTION_SOURCE
     values = [
-        ("marginal_wheel_efficiency", 0.30, "fraction"),
-        ("idle_rate", 0.25, "US-gal/hour"), ("coast_deceleration", 0.05, "g"),
-        ("enrichment_start_fraction", 0.5, "rated power fraction"),
-        ("enrichment_max", 0.15, "fraction"), ("drivetrain_factor", 0.9, "fraction"),
-        ("fuel_energy", JOULES_PER_GALLON, "J/gasoline-equivalent US-gal"),
-        ("high_speed_reference", 65, "mph; comparison only"),
-        ("road_conditions", "level, no wind, warm engine", None),
-        ("braking_fuel_cutoff", "zero fuel during both scenario decelerations; unobserved assumption", None),
-        ("event_context", "earlier anticipation and different arrival times may be infeasible in traffic", None),
-        ("endpoint_speed_tolerance", 2.0, "m/s"),
+        ("marginal_wheel_efficiency", p["marginal_wheel_efficiency"], "fraction", car_source),
+        ("idle_rate", p["idle_rate"], "US-gal/hour", car_source), ("coast_deceleration", p["coast_deceleration"], "g", car_source),
+        ("enrichment_start_fraction", p["enrichment_start_fraction"], "rated power fraction", car_source),
+        ("enrichment_max", p["enrichment_max"], "fraction", car_source), ("drivetrain_factor", p["drivetrain_factor"], "fraction", car_source),
+        ("fuel_energy", p["fuel_energy"], "J/US-gal" if own else "J/gasoline-equivalent US-gal", car_source),
+        ("high_speed_reference", 65, "mph; comparison only", NOTION_SOURCE),
+        ("road_conditions", "level, no wind, warm engine", None, NOTION_SOURCE),
+        ("braking_fuel_cutoff", "zero fuel during both scenario decelerations; unobserved assumption", None, NOTION_SOURCE),
+        ("event_context", "earlier anticipation and different arrival times may be infeasible in traffic", None, NOTION_SOURCE),
+        ("endpoint_speed_tolerance", 2.0, "m/s", NOTION_SOURCE),
     ]
     assumptions = [{"key": key, "value": value, "unit": unit, "is_estimate": True,
-                    "source_url": NOTION_SOURCE, "as_of": "2026-10-24"} for key, value, unit in values]
-    assumptions.append({"key": "gas_price", "value": float(price), "unit": "USD/US-gal",
+                    "source_url": source, "as_of": "2026-10-24"} for key, value, unit, source in values]
+    # The price is for the fuel the car burns: a diesel profile is priced in diesel.
+    price_key = "diesel_price" if profile.get("fuel_type") == "diesel" else "gas_price"
+    assumptions.append({"key": price_key, "value": float(price), "unit": "USD/US-gal",
                         "is_estimate": True, "source_url": price_source_url, "as_of": price_as_of})
-    config = {"model_version": MODEL_VERSION, "vehicle_profile": reference_profile(),
+    config = {"model_version": MODEL_VERSION, "vehicle_profile": profile,
               "fuel_price_usd_per_gal": float(price), "assumptions": assumptions}
     digest = hashlib.sha256(json.dumps(config, sort_keys=True, allow_nan=False).encode()).hexdigest()
     config["id"] = str(uuid5(NAMESPACE_URL, "drive-save:scoring-config:" + digest))
     return config
 
 
+def _valid_vehicle(profile):
+    """Another car's profile: the fields the model reads, with every parameter its own."""
+    try:
+        road, own = profile["road_load_si"], profile["parameters"]
+        positive = [profile["mass_kg"], profile["rated_horsepower"], profile["city_mpg"], profile["highway_mpg"],
+                    *(own[key] for key in DEFAULT_PARAMETERS if key != "enrichment_max")]
+        numbers = [*positive, own["enrichment_max"], road["a_n"], road["b_n_per_mps"], road["c_n_per_mps2"]]
+    except (KeyError, TypeError):
+        return False
+    return (set(own) == set(DEFAULT_PARAMETERS) and all(finite_number(n) for n in numbers)
+            and all(n > 0 for n in positive) and own["enrichment_max"] >= 0 and own["enrichment_start_fraction"] < 1)
+
+
 def _valid_config(profile, config):
-    if not isinstance(profile, dict) or profile != reference_profile():
+    if not isinstance(profile, dict) or (profile != reference_profile() and not _valid_vehicle(profile)):
         raise TraceError("unsupported_vehicle_profile")
     if not isinstance(config, dict):
         raise TraceError("invalid_scoring_config")
     try:
-        price = next(a for a in config["assumptions"] if a["key"] == "gas_price")
+        price = next(a for a in config["assumptions"] if a["key"] in ("gas_price", "diesel_price"))
         expected = scoring_config(config["fuel_price_usd_per_gal"], price_as_of=price["as_of"],
-                                  price_source_url=price["source_url"])
+                                  price_source_url=price["source_url"], vehicle_profile=profile)
     except (KeyError, TypeError, ValueError, StopIteration) as exc:
         raise TraceError("invalid_scoring_config") from exc
     if config != expected:

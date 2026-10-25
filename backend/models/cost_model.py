@@ -48,8 +48,11 @@ class EventInput(BaseModel):
 
 class CostModelInput(BaseModel):
     trip: TripInput
-    vehicle: dict[str, JsonValue] = Field(description="The vehicle profile the trip is priced with: the model's 2012 Mazda5, the only car it supports")
-    fuel_price: Assumption = Field(description="US average retail regular gasoline price")
+    vehicle: dict[str, JsonValue] = Field(
+        description="The vehicle profile the trip is priced with: the driver's car from the vehicle list with its own parameters, "
+        "or the model's 2012 Mazda5 when they have none the model supports"
+    )
+    fuel_price: Assumption = Field(description="US average retail price of the car's fuel: regular gasoline, or on-highway diesel for a diesel car")
     events: list[EventInput]
 
 

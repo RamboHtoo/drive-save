@@ -12,6 +12,17 @@ EFFICIENCY = 0.30
 IDLE_GAL_PER_SECOND = 0.25 / 3600
 COAST_DECEL = 0.05 * G
 REFERENCE_SPEED = 65 * MPH_TO_MPS
+# The Notion values above, for the 2012 Mazda5. Another car's profile carries its own in
+# profile["parameters"], worked out from its EPA tests (backend/services/vehicle_params.py).
+DEFAULT_PARAMETERS = {
+    "marginal_wheel_efficiency": EFFICIENCY, "idle_rate": 0.25, "coast_deceleration": 0.05,
+    "enrichment_start_fraction": 0.5, "enrichment_max": 0.15, "drivetrain_factor": 0.9,
+    "fuel_energy": JOULES_PER_GALLON,
+}
+
+
+def parameters(profile):
+    return {**DEFAULT_PARAMETERS, **profile.get("parameters", {})}
 
 
 def road_load(v, profile):
@@ -22,25 +33,33 @@ def road_load(v, profile):
 def fuel_per_meter(v, profile):
     if v <= 0:
         raise ValueError("Steady-speed fuel per metre is undefined at zero speed")
-    return road_load(v, profile) / (EFFICIENCY * JOULES_PER_GALLON) + IDLE_GAL_PER_SECOND / v
+    p = parameters(profile)
+    return road_load(v, profile) / (p["marginal_wheel_efficiency"] * p["fuel_energy"]) + p["idle_rate"] / 3600 / v
 
 
 def brake_scenario(v1, v2, duration, profile):
+    coast = parameters(profile)["coast_deceleration"] * G
     distance_you = (v1 + v2) / 2 * duration
-    distance_twin = (v1 * v1 - v2 * v2) / (2 * COAST_DECEL)
+    distance_twin = (v1 * v1 - v2 * v2) / (2 * coast)
     extra = max(0.0, distance_twin - distance_you)
     return {"fuel_gal": extra * fuel_per_meter(v1, profile),
             "extra_cruise_distance_m": extra, "preceding_seconds": extra / v1,
-            "twin_duration_s": (v1 - v2) / COAST_DECEL}
+            "twin_duration_s": (v1 - v2) / coast}
+
+
+def _enrichment(fraction, p):
+    start = p["enrichment_start_fraction"]
+    return p["enrichment_max"] * np.clip((fraction - start) / (1 - start), 0, 1)
 
 
 def acceleration_scenario(v1, v2, duration, peak_g, profile):
+    p = parameters(profile)
     mean = (v1 + v2) / 2
     energy = 0.5 * profile["mass_kg"] * (v2 * v2 - v1 * v1) + road_load(mean, profile) * mean * duration
     peak_power = (profile["mass_kg"] * G * peak_g + road_load(v2, profile)) * v2
-    fraction = peak_power / (0.9 * 745.7 * profile["rated_horsepower"])
-    enrichment = 0.15 * min(1.0, max(0.0, (fraction - 0.5) / 0.5))
-    return {"fuel_gal": enrichment * energy / (EFFICIENCY * JOULES_PER_GALLON),
+    fraction = peak_power / (p["drivetrain_factor"] * 745.7 * profile["rated_horsepower"])
+    enrichment = float(_enrichment(fraction, p))
+    return {"fuel_gal": enrichment * energy / (p["marginal_wheel_efficiency"] * p["fuel_energy"]),
             "energy_j": energy, "estimated_peak_power_fraction": fraction,
             "enrichment_fraction": enrichment}
 
@@ -75,12 +94,13 @@ def diagnostic_cycle_fuel(time, speed, profile):
     Zero fuel requires both deceleration and non-positive wheel power in this
     assumed scenario. Idle explicitly consumes fuel. No cold-start/gear model.
     """
+    p = parameters(profile)
     dt = np.diff(time)
     v = (speed[:-1] + speed[1:]) / 2
     acceleration = np.diff(speed) / dt
     power = (profile["mass_kg"] * acceleration + road_load(v, profile)) * v
-    fraction = np.maximum(power, 0) / (0.9 * 745.7 * profile["rated_horsepower"])
-    enrichment = 0.15 * np.clip((fraction - 0.5) / 0.5, 0, 1)
-    rate = IDLE_GAL_PER_SECOND + np.maximum(power, 0) * (1 + enrichment) / (EFFICIENCY * JOULES_PER_GALLON)
+    fraction = np.maximum(power, 0) / (p["drivetrain_factor"] * 745.7 * profile["rated_horsepower"])
+    enrichment = _enrichment(fraction, p)
+    rate = p["idle_rate"] / 3600 + np.maximum(power, 0) * (1 + enrichment) / (p["marginal_wheel_efficiency"] * p["fuel_energy"])
     rate[(acceleration < 0) & (power <= 0) & (v > 0)] = 0
     return float(np.sum(rate * dt))

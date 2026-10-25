@@ -30,7 +30,7 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | `GET /users/me/vehicle` | The driver's car: the one picked at sign-up, or as last sent | Done |
 | `GET /users/{user_id}/progress` | Baseline, weekly trend, estimated savings (self only) | Done |
 | `POST /trips` | Upload a trip summary, detected events and GPS speed readings | Done, idempotent |
-| `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done, priced by the data teammate's Mazda5 fuel model |
+| `GET /trips/{trip_id}/receipt` | Financial receipt and assumptions (owner only) | Done, priced by the data teammate's fuel model as the driver's car |
 | `GET /trips/{trip_id}/cost-input` | Exactly what the cost model receives for a trip (owner only) | Done |
 | `POST /crews` | Create a crew; the creator joins automatically | Done |
 | `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done |
@@ -75,7 +75,7 @@ How the list and the parameters are built: [vehicle-catalog.md](vehicle-catalog.
 - `vehicle` is optional at sign-up. `GET /users/me/vehicle` returns the stored car, or `404` with `vehicle_not_set`.
 - `PUT /users/me/vehicle` still replaces the car with any JSON object (1 to 200 fields, under 20 KB), stored and returned as sent. To change to a car from the list, send its `GET /vehicles/details` object. A free-form example: [`fixtures/sample-vehicle.json`](../fixtures/sample-vehicle.json).
 
-The current fuel model supports one car, a 2012 Mazda5, and prices every trip as that car. The driver's car and its parameters stay on file for when the model supports more cars.
+Trips are priced as the driver's car, with its parameters. A driver with no car the model supports (none picked, one sent with `PUT`, or `supported: false`) is priced as the model's 2012 Mazda5. Each car has its own scoring configuration, so changing cars starts a new baseline.
 
 ## Trips
 
@@ -122,13 +122,15 @@ Response (`201`, or `200` for a duplicate):
 
 Example response: [`fixtures/sample-receipt.json`](../fixtures/sample-receipt.json). The iOS app can bundle this file as its offline fallback.
 
-Trips are priced by the data teammate's Mazda5 fuel model ([`docs/cost-model.md`](cost-model.md)). Its estimates are experimental: **show `label` ("Estimated fuel savings; accuracy not yet validated") with the amounts.**
+Trips are priced by the data teammate's fuel model ([`docs/cost-model.md`](cost-model.md)). Its estimates are experimental: **show `label` ("Estimated fuel savings; accuracy not yet validated") with the amounts.**
+
+- `vehicle`: the car the trip was priced as, e.g. `2020 Toyota CAMRY`, or `2012 Mazda5 2.5L automatic (5-speed), FWD` for a driver with no car the model supports.
 
 - `events[].cost_usd`: what each event cost. Braking and acceleration have a cost; sharp turns are coaching only and cost $0.
 - `high_speed_cost_usd`: the cost of driving above 65 mph, which isn't tied to an event.
 - `avoidable_cost_usd`: the trip's total: the event costs plus `high_speed_cost_usd`.
 - `cost_model`: which model produced the amounts, `notion-mazda5-2012-auto-v1`.
-- `assumptions[]`: every numeric constant with its `source_url` and `as_of` date, including the fuel price (`gas_price`). `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
+- `assumptions[]`: every numeric constant with its `source_url` and `as_of` date, including the fuel price (`gas_price`, or `diesel_price` for a diesel car). For a car from the vehicle list, the car's own parameters (`marginal_wheel_efficiency`, `idle_rate` and so on) have EPA's Test Car List as their source. `is_estimate: true` marks team assumptions rather than published figures; show those as "estimate" in the UI.
 - `notes[]`: the assumptions that aren't numbers, such as `road_conditions: level, no wind, warm engine`.
 - A trip the model couldn't price returns `409` with `trip_not_scored`; `message` names the reason, for example `event_recording_incomplete`.
 

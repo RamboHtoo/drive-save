@@ -6,14 +6,18 @@ readings from 10 s before to 10 s after it, the vehicle profile and the fuel
 price. estimate() hands that to drive_save_model.estimate_trip and returns the
 result in the shape the database stores. See docs/cost-model.md.
 
-The model is experimental. It supports one car, a 2012 Mazda5, and its results
-may only be shown as demo data, which the shared schema enforces. So every trip
-is priced as that car, and every crew and trip is stored as demo (DEMO_ONLY).
+The model was built for a 2012 Mazda5. It prices the driver's own car from the
+vehicle list with that car's parameters (car_profile, docs/vehicle-catalog.md),
+and a driver without a car it supports as the Mazda5. Its results may only be
+shown as demo data, which the shared schema enforces, so every crew and trip is
+stored as demo (DEMO_ONLY).
 """
 
+import json
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import date, timedelta
+from functools import lru_cache
 from uuid import UUID
 
 from drive_save_model import estimate_trip, scoring_config
@@ -22,11 +26,19 @@ from pydantic import JsonValue
 from models.cost_model import CostModelInput, CostModelOutput, EventInput, TripInput
 from models.trips import Assumption, TripCreate
 
-# EIA weekly US average retail price, regular gasoline. Update when EIA publishes a new week;
-# a new price makes a new scoring configuration, so every driver's baseline starts again.
+# EIA weekly US average retail prices, including taxes: regular gasoline, and on-highway diesel for
+# diesel cars. Update both when EIA publishes a new week; a new price makes a new scoring
+# configuration, so every driver's baseline starts again.
 US_AVERAGE_FUEL_PRICE = Assumption(
     key="fuel_price",
     value=4.284,
+    unit="USD/gal",
+    source_url="https://www.eia.gov/dnav/pet/pet_pri_gnd_dcus_nus_w.htm",
+    as_of=date(2026, 10, 19),
+)
+US_AVERAGE_DIESEL_PRICE = Assumption(
+    key="fuel_price",
+    value=6.276,
     unit="USD/gal",
     source_url="https://www.eia.gov/dnav/pet/pet_pri_gnd_dcus_nus_w.htm",
     as_of=date(2026, 10, 19),
@@ -38,6 +50,37 @@ SCORING_CONFIG = scoring_config(
     price_source_url=US_AVERAGE_FUEL_PRICE.source_url,
 )
 DEMO_ONLY = True  # the schema accepts experimental results only on demo trips (trips_math_model_demo_only)
+# Where each car's own parameters come from; receipts show it as their source.
+EPA_TEST_CARS_URL = "https://www.epa.gov/compliance-and-fuel-economy-data/data-cars-used-testing-fuel-economy"
+
+
+def car_profile(vehicle_profile: dict[str, JsonValue], parameters: list[dict], fuel_type: str) -> dict[str, JsonValue]:
+    """A car from the vehicle list as the model prices it: its profile plus its own parameters and fuel."""
+    return {
+        **vehicle_profile,
+        "fuel_type": fuel_type,
+        "parameters": {p["key"]: p["value"] for p in parameters},
+        "parameters_source_url": EPA_TEST_CARS_URL,
+    }
+
+
+def fuel_price_for(vehicle: dict[str, JsonValue]) -> Assumption:
+    return US_AVERAGE_DIESEL_PRICE if vehicle.get("fuel_type") == "diesel" else US_AVERAGE_FUEL_PRICE
+
+
+def scoring_config_for(vehicle: dict[str, JsonValue]) -> dict:
+    """The configuration a trip is priced with: the price of the car's fuel, and its profile and parameters.
+    Each car has its own, so each driver's baseline belongs to their car."""
+    if vehicle == SCORING_CONFIG["vehicle_profile"]:
+        return SCORING_CONFIG
+    return _car_config(json.dumps(vehicle, sort_keys=True))
+
+
+@lru_cache(maxsize=1024)
+def _car_config(vehicle_json: str) -> dict:
+    vehicle = json.loads(vehicle_json)
+    price = fuel_price_for(vehicle)
+    return scoring_config(price.value, price_as_of=price.as_of.isoformat(), price_source_url=price.source_url, vehicle_profile=vehicle)
 
 EVENT_WINDOW = timedelta(seconds=10)  # readings included with each event before and after it
 _MPS_PER_MPH = 0.44704
@@ -95,14 +138,15 @@ def build_input(request: PricingRequest) -> CostModelInput:
             speed_samples=samples,
         ),
         vehicle=request.vehicle,
-        fuel_price=US_AVERAGE_FUEL_PRICE,
+        fuel_price=fuel_price_for(request.vehicle),
         events=events,
     )
 
 
 def estimate(inputs: CostModelInput) -> CostModelOutput:
-    """Runs the Mazda5 model. A trip it can't price comes back as insufficient_data, with the reason in quality_flags."""
+    """Runs the model for inputs.vehicle. A trip it can't price comes back as insufficient_data, with the reason in quality_flags."""
     trip = inputs.trip
+    config = scoring_config_for(inputs.vehicle)
     result = estimate_trip(
         vehicle_profile=inputs.vehicle,
         speed_samples=[s.model_dump() for s in trip.speed_samples],
@@ -115,7 +159,7 @@ def estimate(inputs: CostModelInput) -> CostModelOutput:
             "events_complete": trip.events_complete,
             "detector_version": trip.detector_version,
         },
-        scoring_config=SCORING_CONFIG,
+        scoring_config=config,
         events=[
             {
                 "event_id": str(e.event_id),
@@ -133,7 +177,7 @@ def estimate(inputs: CostModelInput) -> CostModelOutput:
     details = result["model_details"]
     costs = {e["event_id"]: e["cost_usd"] for e in details.get("events", [])}
     return CostModelOutput(
-        model_name=SCORING_CONFIG["model_version"],
+        model_name=config["model_version"],
         status=result["status"],
         event_costs_usd=[costs.get(str(e.event_id)) for e in inputs.events],
         fuel_gal=result["fuel_gal"],

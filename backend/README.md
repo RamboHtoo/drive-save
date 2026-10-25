@@ -44,7 +44,7 @@ The tests run against the local TimescaleDB (empty tables before each test; the 
 | `models/` | Pydantic request/response schemas: the API contract |
 | `routes/` | One file per resource: users, vehicles, trips, crews, leaderboard |
 | `models/cost_model.py` | What the cost model receives and returns. See [`docs/cost-model.md`](../docs/cost-model.md) |
-| `services/cost_model.py` | Builds the cost model input and prices the trip with the data teammate's Mazda5 model (`drive_save_model/`). See [`docs/cost-model.md`](../docs/cost-model.md) |
+| `services/cost_model.py` | Builds the cost model input and prices the trip as the driver's car with the data teammate's fuel model (`drive_save_model/`). See [`docs/cost-model.md`](../docs/cost-model.md) |
 | `services/epa_dataset.py`, `services/vehicle_catalog.py`, `services/vehicle_params.py` | The vehicle list: reads the EPA Test Car List files, names each car, and works out each car's fuel model parameters. See [`docs/vehicle-catalog.md`](../docs/vehicle-catalog.md) |
 | `db/002_event_details.sql` | Adds the sharp-turn angle (`heading_change_deg`) the backend stores to the shared schema |
 | `db/003_vehicle_catalog.sql` | The vehicle list's tables: every EPA test row, and one row per brand, model and year |

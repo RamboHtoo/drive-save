@@ -53,6 +53,17 @@ Test weight is an operating-mass assumption, not the actual loaded car's weight.
 The profile is for the US configuration. Other engines, markets, transmissions,
 hybrids and electric vehicles are unsupported; there is no default-car fallback.
 
+Another car can be priced when the backend supplies its profile with a
+`parameters` object holding all seven keys of `physics.DEFAULT_PARAMETERS`
+(efficiency, idle rate, coast deceleration, enrichment start and maximum,
+drivetrain factor, fuel energy), worked out from the car's EPA tests
+([vehicle-catalog.md](vehicle-catalog.md)). Pass the same profile to
+`scoring_config(..., vehicle_profile=profile)`; the configuration then lists
+the car's values as its assumptions. A profile with `"fuel_type": "diesel"`
+lists its price as `diesel_price` instead of `gas_price`; pass the diesel price.
+A profile without `parameters`, like the Mazda5's, keeps the Notion values, and
+its results and configuration are unchanged.
+
 ## Phone and backend contract
 
 Keep recording throughout the trip, including stops. GPS supplies speed in m/s

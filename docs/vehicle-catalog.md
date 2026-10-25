@@ -73,4 +73,8 @@ Hybrids and plug-ins are supported but flagged `drives_with_engine_off`: their f
 
 ## Limits
 
-These parameters are estimates from a few lab tests run through the model's simplified physics, not measurements of anyone's car on the road. The test weight is a standard load, not the driver's. The current fuel model still prices every trip as the 2012 Mazda5; using these parameters needs the data teammate's model to accept other vehicle profiles.
+These parameters are estimates from a few lab tests run through the model's simplified physics, not measurements of anyone's car on the road. The test weight is a standard load, not the driver's. Diesel cars are priced at EIA's on-highway diesel price; every gasoline car at the regular gasoline price, including cars that need premium (the EPA list doesn't say which do).
+
+## How trips use them
+
+A driver's trips are priced as their car: `backend/repo.py` looks up the car picked at sign-up (`vehicle_id`), and the model gets its profile with `parameters` and `parameters_source_url` added (`car_profile` in [`backend/services/cost_model.py`](../backend/services/cost_model.py)). The model's physics reads the parameters from the profile; a profile without them, like the Mazda5's, uses the Notion values, so Mazda5 results are unchanged. Every supported car prices the model's demo trip without errors. A driver with no car the model supports is priced as the Mazda5.

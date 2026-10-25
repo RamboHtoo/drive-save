@@ -233,7 +233,8 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
             trip.detector_version,
         )
 
-        inputs = cost_model.build_input(cost_model.PricingRequest(trip_id, trip, cost_model.SCORING_CONFIG["vehicle_profile"]))
+        vehicle = await _pricing_vehicle(conn, user.vehicle)
+        inputs = cost_model.build_input(cost_model.PricingRequest(trip_id, trip, vehicle))
         result = await asyncio.to_thread(cost_model.estimate, inputs)  # CPU work, kept off the event loop
         if len(result.event_costs_usd) != len(trip.events):
             raise ApiError(500, "cost_model_error", "The cost model must return one cost per event")
@@ -256,7 +257,7 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
         )
 
         if result.status == "scored":
-            await _record_score(conn, user, trip, trip_id, result)
+            await _record_score(conn, user, trip, trip_id, result, cost_model.scoring_config_for(vehicle))
         else:
             await conn.execute(
                 "UPDATE trips SET status = 'insufficient_data', quality_flags = $2, model_result = $3 WHERE id = $1",
@@ -267,9 +268,21 @@ async def accept_trip(user: User, trip: TripCreate) -> tuple[UUID, bool]:
     return trip_id, False
 
 
-async def _scoring_config(conn: asyncpg.Connection) -> UUID:
-    """The model's configuration is immutable and its id comes from its content, so storing it is idempotent."""
-    config = cost_model.SCORING_CONFIG
+async def _pricing_vehicle(conn: asyncpg.Connection, driver_vehicle: dict[str, JsonValue] | None) -> dict[str, JsonValue]:
+    """The vehicle the model prices a driver's trips as: their car from the vehicle list with its own
+    parameters, or the model's 2012 Mazda5 when they have no car there that it supports."""
+    try:
+        vehicle_id = UUID(str((driver_vehicle or {})["vehicle_id"]))
+    except (KeyError, ValueError):  # no car, or one sent as free-form data with PUT /users/me/vehicle
+        return cost_model.SCORING_CONFIG["vehicle_profile"]
+    row = await conn.fetchrow("SELECT vehicle_profile, parameters, fuel_type FROM vehicle_models WHERE id = $1 AND supported", vehicle_id)
+    if row is None:  # an electric car, say, or a car no longer in the list
+        return cost_model.SCORING_CONFIG["vehicle_profile"]
+    return cost_model.car_profile(row["vehicle_profile"], row["parameters"], row["fuel_type"])
+
+
+async def _scoring_config(conn: asyncpg.Connection, config: dict) -> UUID:
+    """A configuration is immutable and its id comes from its content, so storing it is idempotent."""
     config_id = UUID(config["id"])
     await conn.execute(
         """
@@ -285,8 +298,8 @@ async def _scoring_config(conn: asyncpg.Connection) -> UUID:
     return config_id
 
 
-async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, trip_id: UUID, result: CostModelOutput) -> None:
-    config_id = await _scoring_config(conn)
+async def _record_score(conn: asyncpg.Connection, user: User, trip: TripCreate, trip_id: UUID, result: CostModelOutput, config: dict) -> None:
+    config_id = await _scoring_config(conn, config)
     avoidable = result.avoidable_usd
 
     # Baseline: the first 3 scored trips of at least a mile, per driver, configuration and demo flag.
@@ -411,6 +424,7 @@ async def receipt(trip_id: UUID, user_id: UUID) -> Receipt:
         avoidable_cost_usd=_float(t["avoidable_usd"], 4),
         high_speed_cost_usd=_float(details.get("cost_breakdown_usd", {}).get("high_speed"), 4),
         cost_model=t["model_version"],
+        vehicle=(t["vehicle_profile"] or {}).get("name"),
         label=details.get("receipt_label"),
         assumptions=[Assumption(**a) for a in numeric],
         notes=[f"{a['key']}: {a['value']}" for a in t["assumptions"] if a not in numeric],
@@ -426,8 +440,9 @@ async def cost_input(trip_id: UUID, user_id: UUID) -> CostModelInput:
     async with db.pool().acquire() as conn:
         t = await _owned_trip(conn, trip_id, user_id)
         trip = await _load_trip(conn, trip_id)
-    # Unpriced trips have no stored configuration; the model got the same Mazda5 profile.
-    vehicle = t["vehicle_profile"] or cost_model.SCORING_CONFIG["vehicle_profile"]
+        # A priced trip keeps the vehicle it was priced as. An unpriced one has no stored configuration:
+        # show the driver's car as it is now, which is what the model got unless they changed cars since.
+        vehicle = t["vehicle_profile"] or await _pricing_vehicle(conn, await conn.fetchval("SELECT vehicle FROM users WHERE id = $1", user_id))
     return cost_model.build_input(cost_model.PricingRequest(trip_id, trip, vehicle))
 
 

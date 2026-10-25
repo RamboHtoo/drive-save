@@ -1,10 +1,11 @@
 # Cost model
 
-The backend prices every trip with the data teammate's Mazda5 fuel model, [`drive_save_model`](../drive_save_model/) (how it works: [`docs/fuel-model.md`](fuel-model.md)). It runs once, when the trip is uploaded; the result is stored in Tiger Data and the receipt the app shows is read from there.
+The backend prices every trip with the data teammate's fuel model, [`drive_save_model`](../drive_save_model/) (how it works: [`docs/fuel-model.md`](fuel-model.md)). It runs once, when the trip is uploaded; the result is stored in Tiger Data and the receipt the app shows is read from there.
 
 ## What to know
 
-- **One car.** The model supports a single car, the 2012 Mazda5 2.5 L automatic (FuelEconomy.gov vehicle 31284 and its EPA test data). Every trip is priced as that car, whichever car the driver picked with `PUT /users/me/vehicle`. The driver's car stays on file for models that support more cars.
+- **The driver's car.** The model was built for the 2012 Mazda5 2.5 L automatic (FuelEconomy.gov vehicle 31284). A driver who picked their car from the vehicle list at sign-up gets it priced as that car, with its own parameters from its EPA tests ([`vehicle-catalog.md`](vehicle-catalog.md)). A driver with no car the model supports (none picked, one sent as free-form data with `PUT /users/me/vehicle`, or an electric car) is priced as the Mazda5. The receipt's `vehicle` says which.
+- **A baseline per car.** Each car has its own scoring configuration, so a driver who changes cars starts a new 3-trip baseline.
 - **Demo data only.** The model is experimental, so its results may only be shown as demo data, and the shared schema enforces it (`trips_math_model_demo_only`). The backend stores every crew and trip as demo (`DEMO_ONLY` in [`backend/services/cost_model.py`](../backend/services/cost_model.py)), and responses say `is_demo: true`.
 - **What costs money.** Harsh braking (compared with coasting down earlier) and rapid acceleration (extra fuel at high power) have a cost. Sharp turns are coaching only and cost $0. Driving above 65 mph adds a separate high-speed cost. `avoidable_cost_usd` on the receipt is all of these together. Amounts are small: for the sample trip, about a cent per event and 10 cents for 3 minutes at 75 mph.
 - **Quality gates.** The model only prices trips it can trust. A trip it can't price is still stored, as `insufficient_data` with the reason in `quality_flags`, and its receipt returns `409` `trip_not_scored` with that reason. Common reasons:
@@ -17,7 +18,7 @@ The backend prices every trip with the data teammate's Mazda5 fuel model, [`driv
   - `missing_braking_comparison_history`, `braking_cruise_scenario_unsupported`: a harsh brake needs steady driving at its starting speed just before it
 
   [`docs/fuel-model.md`](fuel-model.md) lists every gate.
-- **Price.** The US average price of regular gasoline from EIA ($4.284/gal, week of 2026-10-19). The price, the car and every model assumption make one immutable scoring configuration, with an id derived from its contents. A new price makes a new configuration, so every driver's baseline starts again.
+- **Price.** The US average price of the car's fuel from EIA, week of 2026-10-19: regular gasoline at $4.284/gal, or on-highway diesel at $6.276/gal for a diesel car. The price, the car and every model assumption make one immutable scoring configuration, with an id derived from its contents. A new price makes a new configuration, so every driver's baseline starts again.
 
 ## Where it plugs in
 
@@ -72,11 +73,11 @@ The backend doesn't store location, so there are no coordinates.
 
 ### `vehicle`
 
-The vehicle profile the trip is priced with: the model's 2012 Mazda5 (identity, label MPG, EPA test weight and road-load coefficients). It's the same for every trip.
+The vehicle profile the trip is priced with (identity, label MPG, EPA test weight and road-load coefficients): the driver's car from the vehicle list, with its own `parameters` and `parameters_source_url`, or the model's 2012 Mazda5, which has no `parameters` and uses the Notion values.
 
 ### `fuel_price`
 
-The US average retail price of regular gasoline, from the EIA weekly series: `{"key": "fuel_price", "value": 4.284, "unit": "USD/gal", "source_url": "https://www.eia.gov/…", "as_of": "2026-10-19"}`. The scoring configuration carries the same price as its `gas_price` assumption, which the receipt shows.
+The US average retail price of the car's fuel, from the EIA weekly series: `{"key": "fuel_price", "value": 4.284, "unit": "USD/gal", "source_url": "https://www.eia.gov/…", "as_of": "2026-10-19"}` for regular gasoline, or 6.276 for on-highway diesel when the car's `fuel_type` is `diesel`. The scoring configuration carries the same price as its `gas_price` (or `diesel_price`) assumption, which the receipt shows.
 
 ## Output
 
@@ -94,7 +95,9 @@ The US average retail price of regular gasoline, from the EIA weekly series: `{"
 
 | Data | Status | Notes |
 | --- | --- | --- |
-| Other cars | Open | The model supports only the Mazda5. The app already sends each driver's EPA car data, ready for a model that uses it |
+| Other cars | Done | Gasoline and diesel cars from the vehicle list, with parameters from their EPA tests ([`vehicle-catalog.md`](vehicle-catalog.md)) |
+| Diesel price | Done | EIA's on-highway diesel price, for diesel cars |
+| Premium gasoline price | Open | Cars that need premium are priced at the regular price; the EPA list doesn't say which cars need it |
 | Electricity price ($/kWh) for electric cars | Open | Needed once the model supports electric cars |
 | Elevation change | Open, optional | Speeding up uphill takes extra energy; braking downhill is often unavoidable. The phone can measure it with GPS altitude or the barometer |
 
