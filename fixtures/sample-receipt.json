@@ -1,6 +1,18 @@
 {
   "trip_id": "7ccf606b-8ddd-40b2-a419-987d9021e128",
   "distance_mi": 4.7017,
+  "scored_distance_mi": 4.701655,
+  "scoring_started_at": "2026-10-24T20:01:00Z",
+  "scoring_ended_at": "2026-10-24T20:06:00Z",
+  "scoring_duration_seconds": 300.0,
+  "monetary_scope": "observed_gps_window",
+  "quality_flags": [
+    "experimental_estimate",
+    "flat_road_warm_engine_assumed",
+    "traffic_feasibility_unverified",
+    "fuel_cutoff_assumed",
+    "lab_and_event_accuracy_unverified"
+  ],
   "events": [
     {
       "type": "harsh_brake",
@@ -26,7 +38,7 @@
   ],
   "avoidable_cost_usd": 0.1182,
   "high_speed_cost_usd": 0.1026,
-  "cost_model": "vehicle-fuel-v1",
+  "cost_model": "vehicle-fuel-v2",
   "vehicle": "2012 Mazda5 2.5L automatic (5-speed), FWD",
   "label": "Estimated fuel savings; accuracy not yet validated",
   "assumptions": [

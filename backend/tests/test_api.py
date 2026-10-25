@@ -126,7 +126,7 @@ def test_upload_sample_trip_and_read_receipt(client):
 
     receipt = client.get(created["receipt_url"], headers=headers).json()
     assert receipt["trip_id"] == created["trip_id"]
-    assert (receipt["cost_model"], receipt["is_estimate"], receipt["is_demo"]) == ("vehicle-fuel-v1", True, True)
+    assert (receipt["cost_model"], receipt["is_estimate"], receipt["is_demo"]) == ("vehicle-fuel-v2", True, True)
     assert receipt["label"] == "Estimated fuel savings; accuracy not yet validated"
     # The Mazda5 model prices braking and acceleration; sharp turns are coaching only. Time above 65 mph adds to the total.
     brake, accel, turn = (e["cost_usd"] for e in receipt["events"])
@@ -151,7 +151,8 @@ def test_trip_without_events_only_pays_for_time_above_65_mph(client):
     [
         pytest.param(lambda t: t.update(events_complete=False), "event_recording_incomplete", id="detector-stopped"),
         pytest.param(lambda t: t.pop("detector_version"), "missing_detector_version", id="no-trip-detector-version"),
-        pytest.param(lambda t: t.update(speed_samples=t["speed_samples"][:150]), "missing_boundary_speed", id="readings-stop-early"),
+        pytest.param(lambda t: t.update(speed_samples=t["speed_samples"][:150]), "gps_boundary_gap_over_three_seconds", id="readings-stop-early"),
+        pytest.param(lambda t: t.update(speed_samples=t["speed_samples"][5:]), "gps_boundary_gap_over_three_seconds", id="first-fix-5-s-late"),
         pytest.param(lambda t: [e.pop("duration_s") for e in t["events"]], "invalid_event_duration", id="no-event-duration"),
     ],
 )
@@ -168,6 +169,27 @@ def test_trip_the_model_cannot_price_is_kept_without_a_receipt(client, change, r
     row = query("SELECT status, quality_flags, fuel_gal FROM trips WHERE user_id = $1", uuid.UUID(user_id))[0]
     assert (row["status"], json.loads(row["quality_flags"]), row["fuel_gal"]) == ("insufficient_data", [reason], None)
     assert query("SELECT count(*) AS n FROM trip_metrics")[0]["n"] == 0
+
+
+def test_trip_is_priced_over_its_observed_gps_window(client):
+    """A phone starts and stops a trip on a tap, and its location fixes arrive on their own schedule: here the
+    first comes 0.6 s after the start and is too inaccurate to use, and the last 0.4 s before the end."""
+    user_id, headers = new_user(client)
+    trip = fresh_trip()
+    samples = trip["speed_samples"]
+    samples[0]["speed_accuracy_mps"] = 5.0
+    uploaded = (parse(samples[0]["ts"]) - timedelta(milliseconds=600), parse(samples[-1]["ts"]) + timedelta(milliseconds=400))
+    trip["started_at"], trip["ended_at"] = (t.isoformat().replace("+00:00", "Z") for t in uploaded)
+
+    res = upload(client, headers, trip)
+    receipt = client.get(res.json()["receipt_url"], headers=headers).json()
+    assert "gps_window_trimmed" in receipt["quality_flags"]
+    assert receipt["label"] == "Estimated fuel savings for GPS-covered portion only; accuracy not yet validated"
+    assert (parse(receipt["scoring_started_at"]), parse(receipt["scoring_ended_at"])) == (parse(samples[1]["ts"]), parse(samples[-1]["ts"]))
+    # The trip itself is stored as uploaded, so a retry still matches it.
+    row = query("SELECT started_at, ended_at FROM trips WHERE user_id = $1", uuid.UUID(user_id))[0]
+    assert (row["started_at"], row["ended_at"]) == uploaded
+    assert upload(client, headers, trip).json()["duplicate"] is True
 
 
 def test_everything_is_demo_data_while_the_model_is_experimental(client):
