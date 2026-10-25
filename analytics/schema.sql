@@ -1,4 +1,4 @@
--- Drive Save schema v1. Run the entire file in Tiger Cloud SQL Editor.
+-- Drive Save schema v4. Run the entire file in Tiger Cloud SQL Editor.
 -- Requires TimescaleDB (verified on your service as 2.31.0).
 -- No passwords, demo data, or destructive statements are included.
 BEGIN;
@@ -11,6 +11,25 @@ BEGIN
   END IF;
 END $$;
 -- END EXTENSION CHECK
+
+DO $$
+BEGIN
+  IF to_regclass('public.crews') IS NOT NULL THEN
+    RAISE EXCEPTION 'Existing v1 database: run analytics/migrations/002_individual_leagues.sql instead of schema.sql';
+  END IF;
+  IF to_regclass('public.trips') IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'trips' AND column_name = 'model_result'
+  ) THEN
+    RAISE EXCEPTION 'Existing v2 database: run analytics/migrations/003_fuel_model_receipts.sql instead of schema.sql';
+  END IF;
+  IF to_regclass('public.trips') IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='trips' AND column_name='events_complete'
+  ) THEN
+    RAISE EXCEPTION 'Existing v3 database: run analytics/migrations/004_mazda_math_model.sql';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.schema_versions (
   version integer PRIMARY KEY,
@@ -27,7 +46,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS public.crews (
+CREATE TABLE IF NOT EXISTS public.leagues (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 100),
   join_code text NOT NULL UNIQUE,
@@ -35,12 +54,12 @@ CREATE TABLE IF NOT EXISTS public.crews (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS public.crew_members (
+CREATE TABLE IF NOT EXISTS public.league_members (
   user_id uuid PRIMARY KEY REFERENCES public.users(id),
-  crew_id uuid NOT NULL REFERENCES public.crews(id),
+  league_id uuid NOT NULL REFERENCES public.leagues(id),
   joined_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS crew_members_crew_idx ON public.crew_members (crew_id);
+CREATE INDEX IF NOT EXISTS league_members_league_idx ON public.league_members (league_id);
 
 -- Create a NEW configuration when vehicle, price, model, or assumptions change.
 -- Existing receipts reference their original configuration.
@@ -69,7 +88,7 @@ CREATE TABLE IF NOT EXISTS public.trips (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.users(id),
   client_trip_id uuid NOT NULL,
-  crew_id uuid REFERENCES public.crews(id), -- membership snapshot at acceptance
+  league_id uuid REFERENCES public.leagues(id), -- membership snapshot at acceptance
   started_at timestamptz NOT NULL,
   ended_at timestamptz NOT NULL,
   distance_mi numeric(14,6) NOT NULL
@@ -86,6 +105,10 @@ CREATE TABLE IF NOT EXISTS public.trips (
   baseline_slot smallint CHECK (baseline_slot BETWEEN 1 AND 3),
   quality_flags jsonb NOT NULL DEFAULT '[]'::jsonb
     CHECK (jsonb_typeof(quality_flags) = 'array'),
+  model_result jsonb CONSTRAINT trips_model_result_object
+    CHECK (model_result IS NULL OR jsonb_typeof(model_result) = 'object'),
+  events_complete boolean NOT NULL DEFAULT false,
+  detector_version text CHECK (detector_version IS NULL OR length(trim(detector_version)) BETWEEN 1 AND 100),
   accepted_seq bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
   received_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, client_trip_id),
@@ -98,10 +121,16 @@ CREATE TABLE IF NOT EXISTS public.trips (
       AND fuel_gal IS NOT NULL AND avoidable_usd IS NOT NULL)
     OR (status <> 'scored' AND fuel_gal IS NULL AND avoidable_usd IS NULL)
   ),
-  CHECK (baseline_slot IS NULL OR (status = 'scored' AND distance_mi >= 1))
+  CHECK (baseline_slot IS NULL OR (status = 'scored' AND distance_mi >= 1)),
+  CONSTRAINT trips_math_model_demo_only CHECK (
+    coalesce(model_result->>'estimate_kind', '') <> 'experimental_math_model' OR is_demo
+  ),
+  CONSTRAINT trips_reference_model_demo_only CHECK (
+    coalesce(model_result->>'estimate_kind', '') <> 'reference_car_simulation' OR is_demo
+  )
 );
 CREATE INDEX IF NOT EXISTS trips_user_time_idx ON public.trips (user_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS trips_crew_time_idx ON public.trips (crew_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS trips_league_time_idx ON public.trips (league_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.trip_events (
   ts timestamptz NOT NULL,
@@ -112,6 +141,8 @@ CREATE TABLE IF NOT EXISTS public.trip_events (
   speed_before_mph double precision CHECK (speed_before_mph BETWEEN 0 AND 120),
   speed_after_mph double precision CHECK (speed_after_mph BETWEEN 0 AND 120),
   detector_version text NOT NULL,
+  duration_s double precision CONSTRAINT trip_events_duration_valid
+    CHECK (duration_s > 0 AND duration_s <= 120 AND duration_s < 'Infinity'::float8),
   cost_usd numeric(14,6) CHECK (cost_usd >= 0 AND cost_usd < 'Infinity'::numeric),
   PRIMARY KEY (ts, event_id)
 );
@@ -133,7 +164,7 @@ CREATE TABLE IF NOT EXISTS public.trip_metrics (
   ts timestamptz NOT NULL, -- exact copy of trips.started_at
   trip_id uuid NOT NULL,
   user_id uuid NOT NULL REFERENCES public.users(id),
-  crew_id uuid REFERENCES public.crews(id),
+  league_id uuid REFERENCES public.leagues(id),
   scoring_config_id uuid NOT NULL REFERENCES public.scoring_configs(id),
   distance_mi numeric(14,6) NOT NULL
     CHECK (distance_mi > 0 AND distance_mi < 'Infinity'::numeric),
@@ -145,7 +176,7 @@ CREATE TABLE IF NOT EXISTS public.trip_metrics (
   FOREIGN KEY (trip_id, ts) REFERENCES public.trips(id, started_at)
 );
 CREATE INDEX IF NOT EXISTS trip_metrics_user_time_idx ON public.trip_metrics (user_id, ts DESC);
-CREATE INDEX IF NOT EXISTS trip_metrics_crew_time_idx ON public.trip_metrics (crew_id, ts DESC);
+CREATE INDEX IF NOT EXISTS trip_metrics_league_time_idx ON public.trip_metrics (league_id, ts DESC);
 
 -- Signed improvement compared with a baseline, not actual bank transfers.
 CREATE TABLE IF NOT EXISTS public.savings_ledger (
@@ -174,7 +205,7 @@ WITH (timescaledb.continuous) AS
 SELECT
   time_bucket(INTERVAL '1 day', ts) AS day,
   user_id,
-  crew_id,
+  league_id,
   scoring_config_id,
   is_baseline,
   is_demo,
@@ -183,7 +214,7 @@ SELECT
   sum(fuel_gal) AS fuel_gal,
   sum(avoidable_usd) AS avoidable_usd
 FROM public.trip_metrics
-GROUP BY day, user_id, crew_id, scoring_config_id, is_baseline, is_demo
+GROUP BY day, user_id, league_id, scoring_config_id, is_baseline, is_demo
 WITH NO DATA;
 
 ALTER MATERIALIZED VIEW public.daily_user_metrics
@@ -198,8 +229,8 @@ SELECT add_continuous_aggregate_policy(
 );
 -- END TIMESCALE SETUP
 
-INSERT INTO public.schema_versions (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO public.schema_versions (version) VALUES (4) ON CONFLICT DO NOTHING;
 COMMIT;
 
--- Expected result: version 1 and a non-null applied_at.
+-- Expected result: highest version 4 and a non-null applied_at.
 SELECT version, applied_at FROM public.schema_versions ORDER BY version;

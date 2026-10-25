@@ -1,20 +1,62 @@
 # Set up the Drive Save database
 
-This is the shared v1 schema for Person 2 and Person 3. It prepares storage;
-it does not implement a fuel model, detect events, or calculate baseline slots.
+Drive Save uses individual competition within leagues. See the
+[product plan](product-plan.md) and [league API contract](league-api.md).
+
+## Upgrade the existing cloud service
+
+The local schema and development Tiger Cloud service are both v4. Migration 004
+(`analytics/migrations/004_mazda_math_model.sql`) was applied to `db-59555` on
+2026-10-24. It adds event
+duration, detector completion/version, and experimental-model demo enforcement.
+Verification found 48 trips, 48 metric rows, and 96 events before and after.
+Ordered trip and event fingerprints, excluding the newly added fields, remained
+`7b7e331331b69ba5d5ce572cc6963d13` and `f38347ff2691666ed08cc7da67d9a416`.
+All existing receipts expose the new coverage keys. The one-minute continuous
+aggregate refresh policy remains scheduled. No model-generated trips were inserted.
+For another v3 service, apply migration 004 before using the Mazda5 scorer.
+
+Migration 003 was previously applied to development Tiger Cloud
+service `db-59555` on 2026-10-24 at approximately 18:08 America/New_York, after 002.
+It preserves old trip values and adds no new table. Verification found 48 trips and
+48 metric rows before and after; the ordered trip-history MD5, excluding the new
+nullable field, remained `1f4f608801d1cbfe6ac422829c61fd62`. All existing receipts
+include the new key, one refresh job remains scheduled, and real-time aggregation
+remains enabled. No model-generated trips were inserted into the cloud by this run.
+
+On another v2 database, apply `analytics/migrations/003_fuel_model_receipts.sql`
+followed by migration 004.
+New empty databases use the current v4 schema. See `docs/fuel-model.md` for the
+Python scoring adapter.
+
+Run the entire `analytics/migrations/002_individual_leagues.sql` in SQL Editor.
+It renames the existing tables and snapshot columns, installs the new analytics
+functions, and retires the old crew leaderboard functions in one transaction.
+It preserves original trips and the continuous aggregate's stored history and
+refresh policy. It can be safely rerun. No demo users/trips are deleted.
+
+Migration 002 has been applied to the development cloud service. Counts immediately
+after migration were unchanged: 32 trips, 64 events, 128 speed samples, and 32 metrics.
+For another v1 service, run the migration; for a new empty service, follow the
+fresh-install instructions below. Do not apply the fresh schema over a v1 service.
+
+This is the shared v4 schema for Person 2 and Person 3. SQL prepares storage;
+the Python model and adapter implement experimental estimates and baseline assignment.
+The phone application still owns motion-event detection.
 
 ## Apply to the empty Tiger Cloud service
 
 1. Open the service's SQL Editor.
 2. Paste the entire contents of `analytics/schema.sql` and run it.
-3. Expect the final result to show schema version `1` and an application timestamp.
+3. Expect the final result to show schema version `4` and an application timestamp.
 4. Run `analytics/verify.sql`. Expect three hypertables and one continuous aggregate
    with `materialized_only = false` and a scheduled refresh job.
 
 The script uses a transaction and preserves data on rerun. If it fails, execute
 `ROLLBACK;` before retrying in the same editor connection. Share the error text,
-not the database password. Rerun safety applies to this exact v1 definition;
+not the database password. Rerun safety applies to this exact v4 definition;
 `IF NOT EXISTS` does not migrate tables independently created with different columns.
+Existing v2 installations must run 003 then 004; v3 installations run 004.
 
 No demo data is inserted. No passwords or database roles are created. Person 2
 should provision a backend application role with only the access its routes need;
@@ -23,11 +65,15 @@ the backend environment, never the iPhone app or Git.
 
 ## Tables
 
-- `users`, `crews`, `crew_members`: backend-owned identities and current membership.
-  A user belongs to at most one crew in v1.
+- `users`, `leagues`, `league_members`: backend-owned identities and current membership.
+  A user belongs to at most one league in this MVP.
 - `trips`: source of truth; a client trip UUID is unique per user. Replay and
   synthetic trips must be marked as demo. Unscored is distinct from zero cost.
+  `model_result` contains scenario breakdowns, diagnostics and validation status.
+  Experimental math results and historical reference simulations must be demo.
+  `events_complete` defaults to false; `detector_version` identifies the trip detector.
 - `trip_events`: detected possible harsh maneuvers, including detector version.
+  `duration_s` is required by the new model but nullable for legacy history.
   Event-level cost is optional and must come from the server model.
 - `speed_samples`: GPS speed observations with timestamps, sequence numbers, and
   optional accuracy. Convert invalid GPS speed/accuracy to NULL before insertion.
@@ -36,7 +82,7 @@ the backend environment, never the iPhone app or Git.
   source_url can be null for explicitly labeled user-entered assumptions.
 - `trip_metrics`: server-produced projection of a completed financial estimate.
 - `daily_user_metrics`: daily continuous aggregate over metrics, retaining separate
-  user, crew, configuration, baseline, and demo groups.
+  user, league, configuration, baseline, and demo groups.
 - `savings_ledger`: signed estimated improvement; never a record of a bank transfer.
 - `game_results`: separate parked-game results; do not count them as fuel savings.
 
@@ -47,7 +93,7 @@ g, display speeds in mph, and GPS observations in m/s. Money is USD; do not roun
 until rendering. The initial three event types match Backend Plan. Coordinates
 and full accelerometer streams are intentionally absent.
 
-`POST /trips` should accept stable event UUIDs, detector_version, and optionally a
+`POST /trips` should accept stable event UUIDs, detector_version, plus event start time and duration. The Mazda5 model requires a complete
 speed_samples array with ts, sample_seq, speed_mps, speed_accuracy_mps. The server
 infers user_id from the token. It validates event/sample timestamps against the
 trip interval, finite numeric inputs, unique event IDs and sample sequences within
@@ -74,9 +120,9 @@ This prevents duplicated trip totals when events are joined for receipts.
 UTC calendar weeks begin Monday; a whole trip belongs to its start day. Later-trip
 improvement is (baseline - weekly cost per mile)/baseline. Keep negative results;
 return unranked for incomplete or zero baselines and weeks without eligible trips.
-Separate demo and real queries explicitly. Crew membership history is represented
-by the crew_id copied into each accepted trip; joining another crew does not
-transfer old trip metrics to that crew.
+Separate demo and real queries explicitly. League membership history is represented
+by the league_id copied into each accepted trip; joining another league does not
+transfer old trip metrics to that league.
 
 ## Continuous aggregate behavior
 
@@ -91,15 +137,15 @@ manually refresh complete UTC day ranges before presenting their trends.
 
 1. Run the entire `analytics/queries.sql` in SQL Editor. This installs SQL functions
    that the backend can call using asyncpg; no Python analytics dependency is needed.
-2. Run `analytics/demo_seed.sql`. This adds two clearly named demo crews with four
-   drivers each and 32 synthetic trips, then returns a demo leaderboard.
-3. Expected results: Demo East Halls is first with 20% improvement and $0.80 estimated
-   savings; Demo West Halls is second with 10% and $0.40. Both have four eligible
-   drivers and is_demo = true. These are invented fixture values, not model results.
+2. Run `analytics/demo_seed.sql`. This adds one labeled demo league with four
+   drivers and 16 synthetic trips, then returns individual standings.
+3. Expected results: Demo Alex 20% / $0.20; Demo Blair 10% / $0.10; Demo Casey
+   0% / $0.00; Demo Drew -10% / -$0.10. They rank 1 through 4. All figures are
+   invented fixture values and all rows have is_demo = true.
 
 The seed can be rerun without duplicating rows. It does not move old fixture dates
-to the current week. If reused next week, query the original fixture's week. The
-speed traces are sparse examples for testing storage only; they cannot validate
+to the current week. The seed's final query uses the original fixture's week, even
+on a later rerun. The speed traces are sparse examples for testing storage only; they cannot validate
 a fuel simulator.
 
 `tests/analytics_queries.sql` exercises arithmetic and edge cases with all test
@@ -112,19 +158,17 @@ Bind parameters through asyncpg, never by interpolating user input. For example:
 
 ```python
 rows = await connection.fetch(
-    "SELECT * FROM public.drive_save_crews($1::timestamptz, $2::boolean)",
-    week_start, False,
+    "SELECT * FROM public.drive_save_leaderboard($1::uuid, $2::timestamptz, $3::boolean)",
+    league_id, week_start, False,
 )
 ```
 
 - `drive_save_baseline(user_id, scoring_config_id, is_demo)` returns count, rate,
   and collecting_baseline / zero_baseline / ready status.
-- `drive_save_members(week_start, is_demo, crew_id DEFAULT NULL)` returns member
-  standings, including null ranks for unready members. NULL crew means all crews.
-- `drive_save_crews(week_start, is_demo)` returns crew standings and both total
-  membership and eligible-member counts. Four registered members and at least one
-  eligible member are required to rank. Percentage improvement is averaged equally
-  across eligible members; ranks are dense, with shared ranks for ties.
+- `drive_save_leaderboard(league_id, week_start, is_demo)` returns individual
+  standings for exactly that league. A null or unknown league returns no rows,
+  never global standings. Unready drivers have null ranks. There is no minimum
+  league size for ranking a driver. Ranks are dense, with shared ranks for ties.
 - `drive_save_progress(user_id, scoring_config_id, is_demo, start_day, end_day)`
   returns daily history including baseline trips. Pass UTC-midnight boundaries,
   end exclusive. Days without data are omitted, not represented as zero spending.
@@ -137,15 +181,20 @@ rows = await connection.fetch(
   whether each trip's analytics projection matches its source row.
 
 The API still owns authorization. User IDs passed to private queries must come
-from the token, and crew queries must be authorized before running. SQL functions
+from the token, and league queries must be authorized before running. SQL functions
 are invoker-security functions; the database is not a public API.
 
 Rankings use each user's latest accepted non-null scoring configuration in the
 selected demo/real cohort. A new configuration starts baseline collection again;
 the previous configuration's results do not contribute to the active ranking.
-Trip crew snapshots must match current membership for competition; old trips do
-not follow a user into a different crew. Rankings include all scored later-trip
+Trip league snapshots must match current membership for competition; old trips do
+not follow a user into a different league. Rankings include all scored later-trip
 distance; the one-mile threshold applies to baseline collection only.
+
+The old drive_save_members and drive_save_crews functions are retired. Person 2
+must update their callers to drive_save_leaderboard and the league routes in the
+API contract before deploying the backend. No backend or iOS implementation is
+present in this repository yet; those changes remain with their respective owners.
 
 For refresh-job health, run the read-only job query in `analytics/verify.sql`;
 being scheduled is not evidence that every execution has succeeded. Financial
