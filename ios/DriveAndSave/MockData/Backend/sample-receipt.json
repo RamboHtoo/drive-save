@@ -1,0 +1,41 @@
+{
+  "trip_id": "7ccf606b-8ddd-40b2-a419-987d9021e128",
+  "distance_mi": 6.4,
+  "events": [
+    {
+      "type": "harsh_brake",
+      "ts": "2026-10-24T20:07:12Z",
+      "speed_before_mph": 34.0,
+      "speed_after_mph": 12.0,
+      "cost_usd": 1.0
+    },
+    {
+      "type": "rapid_accel",
+      "ts": "2026-10-24T20:09:40Z",
+      "speed_before_mph": 8.0,
+      "speed_after_mph": 27.0,
+      "cost_usd": 1.0
+    },
+    {
+      "type": "sharp_turn",
+      "ts": "2026-10-24T20:14:05Z",
+      "speed_before_mph": 22.0,
+      "speed_after_mph": 20.0,
+      "cost_usd": 1.0
+    }
+  ],
+  "avoidable_cost_usd": 3.0,
+  "cost_model": "flat_per_event",
+  "assumptions": [
+    {
+      "key": "cost_per_event",
+      "value": 1.0,
+      "unit": "USD/event",
+      "source_url": null,
+      "as_of": "2026-10-24",
+      "is_estimate": true
+    }
+  ],
+  "is_estimate": true,
+  "is_demo": false
+}

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.1.1
+httpx2==2.16.0  # used by FastAPI's TestClient
+openpyxl==3.1.5  # reads the EPA Test Car List's Excel files (scripts/load_vehicles.py)

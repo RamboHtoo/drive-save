@@ -1,0 +1,7 @@
+# Caddy obtains and renews the HTTPS certificate for API_DOMAIN on its own.
+# Port 80 must be reachable from the internet for the certificate challenge.
+# WebSockets (the live game) pass through reverse_proxy with no extra config.
+{$API_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000
+}

@@ -1,0 +1,19 @@
+{
+  "model_year": 2026,
+  "make": "HONDA",
+  "model": "CIVIC 4DR",
+  "vehicle_type": "Car",
+  "displacement_l": 1.5,
+  "cylinders": 4,
+  "rated_horsepower": 200,
+  "transmission": "Manual",
+  "gears": 6,
+  "drive": "2-Wheel Drive, Front",
+  "equivalent_test_weight_lb": 3250,
+  "target_coef_a_lbf": 25.28,
+  "target_coef_b_lbf_per_mph": 0.1298,
+  "target_coef_c_lbf_per_mph2": 0.01746,
+  "city_test_mpg": 35.8,
+  "highway_test_mpg": 56.3,
+  "test_fuel": "Tier 2 Cert Gasoline"
+}

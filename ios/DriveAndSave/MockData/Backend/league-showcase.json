@@ -1,0 +1,87 @@
+{
+  "crew_id": "215b7f6b-65c7-44bc-b472-5ea2770f1362",
+  "crew_name": "Existing Htoo league \u2014 isolated fixture",
+  "member_count": 6,
+  "active": true,
+  "period": "week",
+  "generated_at": "2026-10-25T12:50:17.967251+00:00",
+  "standings": [
+    {
+      "user_id": "39c1c4d2-5a74-5744-9acd-53acbd2cba5c",
+      "nickname": "Alex \u00b7 Synthetic demo",
+      "rank": 1,
+      "weekly_avoidable_cost_usd": 1.85,
+      "trips_counted": 1,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "ready",
+      "is_synthetic_demo": true,
+      "estimate_source": "supplied_demo_example"
+    },
+    {
+      "user_id": "31a1f188-309d-50c8-9216-f580e4fc3120",
+      "nickname": "Jordan \u00b7 Synthetic demo",
+      "rank": 2,
+      "weekly_avoidable_cost_usd": 2.4,
+      "trips_counted": 1,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "ready",
+      "is_synthetic_demo": true,
+      "estimate_source": "supplied_demo_example"
+    },
+    {
+      "user_id": "c845f6e7-de10-5df8-8ef5-d8c07bab3e53",
+      "nickname": "Sam \u00b7 Synthetic demo",
+      "rank": 3,
+      "weekly_avoidable_cost_usd": 3.12,
+      "trips_counted": 1,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "ready",
+      "is_synthetic_demo": true,
+      "estimate_source": "supplied_demo_example"
+    },
+    {
+      "user_id": "0486f254-2b36-5f7e-9bcb-33c7c8bcc3f8",
+      "nickname": "Taylor \u00b7 Synthetic demo",
+      "rank": 4,
+      "weekly_avoidable_cost_usd": 4.3,
+      "trips_counted": 1,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "ready",
+      "is_synthetic_demo": true,
+      "estimate_source": "supplied_demo_example"
+    },
+    {
+      "user_id": "09abab78-94c6-5c76-abd2-78ea842a1dc3",
+      "nickname": "Casey \u00b7 Synthetic demo",
+      "rank": 5,
+      "weekly_avoidable_cost_usd": 5.75,
+      "trips_counted": 1,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "ready",
+      "is_synthetic_demo": true,
+      "estimate_source": "supplied_demo_example"
+    },
+    {
+      "user_id": "71442485-17cd-4b92-9b7e-e02b209f8ef5",
+      "nickname": "Htoo",
+      "rank": null,
+      "weekly_avoidable_cost_usd": null,
+      "trips_counted": 0,
+      "improvement_pct": null,
+      "est_savings_usd": null,
+      "state": "no_eligible_trips",
+      "is_synthetic_demo": false,
+      "estimate_source": "recorded_scored_trips"
+    }
+  ],
+  "is_demo": true,
+  "is_estimate": true,
+  "ranking_metric": "weekly_avoidable_cost_usd",
+  "demo_preview": true,
+  "viewer_id": "71442485-17cd-4b92-9b7e-e02b209f8ef5"
+}
