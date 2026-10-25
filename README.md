@@ -15,12 +15,13 @@ and real-world accuracy checks are pending, so every receipt is labeled as an es
 - `main` is the HackPSU final integration of the `backend`, `ios` and `analytics`
   branches. The [release report](docs/release-hackpsu-final.md) lists the exact
   commits merged, every check that ran and the deployment prerequisites.
-- The live API at `https://drivesave.nuhylabs.com` still runs the pre-release backend.
-  It does not serve `GET /leaderboard/costs` yet, which the current iOS app uses for
-  standings. Deploy the release only after the steps in
-  [Deployment prerequisites](docs/release-hackpsu-final.md#deployment-prerequisites-and-blockers):
-  apply `backend/db/004_league_demo.sql` and review the app role's grants.
-- The six-player league showcase is local only. Nothing has been seeded in production.
+- The live API at `https://drivesave.nuhylabs.com` runs `main`, including
+  `GET /leaderboard/costs`. Before the redeploy, `backend/db/004_league_demo.sql` was
+  applied to Tiger and `drivesave_app` was granted read-only access to the
+  `drivesave_demo` schema (no insert, update or delete). `backend/db/app_role.sql`
+  does not include that grant yet, so a fresh Tiger setup needs it added by hand.
+- The six-player league showcase is local only. `drivesave_demo` is empty in
+  production and demo writes stay off.
 - Not yet verified: on-road GPS quality on a physical iPhone, and a full
   recording → deployed server → receipt round trip on a device.
 
