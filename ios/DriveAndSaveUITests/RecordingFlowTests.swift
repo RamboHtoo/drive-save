@@ -260,6 +260,14 @@ final class RecordingFlowTests: XCTestCase {
         let latest = recordings.element(boundBy: 0)
         app.scrollFullyIntoView(latest); latest.tap()
         XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Incomplete recording")
+        let sample = app.buttons["openSampleReceipt"]
+        app.scrollFullyIntoView(sample); sample.tap()
+        XCTAssertTrue(app.staticTexts["sampleReceiptVehicle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["sampleReceiptVehicle"].label, "2012 Mazda MAZDA5")
+        XCTAssertTrue(app.staticTexts["sampleReceiptLabel"].exists)
+        XCTAssertTrue(app.staticTexts["Unavailable"].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertEqual(app.staticTexts["receiptEstimateState"].label, "Incomplete recording")
         let remove = app.buttons["deleteLocalTrip"]
         app.scrollFullyIntoView(remove); remove.tap()
         XCTAssertTrue(app.alerts["Delete local recording?"].waitForExistence(timeout: 5))

@@ -43,6 +43,12 @@ struct TripHistoryView: View {
                         .contentShape(Rectangle())
                         .overlay(alignment: .bottom) { MeasurementRule() }
                 }.buttonStyle(.plain).accessibilityIdentifier("historyTrip-\(trip.title)")
+                if SampleTripReceipt.isAvailable(for: trip) {
+                    NavigationLink { SampleTripReceiptView(trip: trip) } label: {
+                        Label("Sample estimate · Mazda MAZDA5", systemImage: "doc.text")
+                            .font(.subheadline).foregroundStyle(DS.acid).frame(minHeight: 44)
+                    }.accessibilityIdentifier("sampleReceipt-\(trip.id)")
+                }
             }
             }
         }.navigationTitle(presentation.isEnabled ? "Sample history" : "Trip history").navigationBarTitleDisplayMode(.inline).refreshable { if !presentation.isEnabled { await model.load() } }

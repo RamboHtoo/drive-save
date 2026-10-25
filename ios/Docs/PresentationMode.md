@@ -81,3 +81,17 @@ Local evidence:
 - `/tmp/DriveSavePresentationSimulator/Logs/Test/Test-DriveAndSave-2026.10.25_09-30-08--0400.xcresult`
 
 Run the offline Swift checks with `bash Tests/run_recording_regressions.sh`. The presentation compile-time boundary check is included. For the focused simulator UI test, use Xcode's `PresentationModeTests`; its helper creates a unique offline test account and never uses production.
+
+## Recorded-trip sample receipt (Mazda preview)
+
+On `codex/presentation-mode`, build/run `DriveAndSave.xcodeproj` with the DriveAndSave scheme and your connected iPhone selected. Use the existing signing team and bundle identifier; install over the app without deleting it.
+
+Turn Presentation Mode **off** to see actual History. Find the October 25, 2026 trip around 10:39 AM and tap **Sample estimate · Mazda MAZDA5** below its row, or open its original receipt and tap **View sample estimate**. The preview is available for saved measured driving recordings, including incomplete recordings; it does not need Developer Mode or a server.
+
+The preview shows **2012 Mazda MAZDA5**, with the supplied gasoline/2.5 L/4-cylinder/157 hp/semi-automatic/FWD specifications and 25 combined, 22.1 city, 29.7 highway MPG. Distance, duration and date come directly from whichever saved trip you opened. Unavailable or partial GPS stays explicitly marked. The fixed **$0.42 Sample estimate** comprises acceleration $0.16, braking $0.11, turning $0.00 and high-speed driving $0.15. These are illustrative allocations, not sensor-derived charges or a server-scored receipt. They do not contribute to actual history or the separate $1.42 sample weekly dashboard.
+
+The original recording, vehicle snapshot, receipt, upload payload and upload eligibility remain unchanged. The preview has no persistence or API dependency. Back returns to the original receipt/History.
+
+Focused fixture checks verify original trip and upload payload bytes remain identical, recorded display values are preserved, and incomplete/walking handling is correct. Physical-phone installation and the specific 10:39 AM trip's stored values were not inspected; those values are read locally when you open the preview.
+
+Final receipt verification: signed generic iPhone build and code-signature verification passed; the complete offline Swift runner passed (including 10 new receipt checks and the existing sample-upload type boundary); the simulator History → original receipt → Mazda sample → original receipt flow passed, including relaunch and isolated test-record cleanup. The first UI run stopped at the pre-existing denied-location prerequisite; setting the simulator location permission to denied resolved it. Evidence: `/tmp/drivesave-sample-receipt-build.log`, `/tmp/drivesave-sample-receipt-regressions.log`, `/tmp/drivesave-sample-receipt-ui.log` and `/tmp/DriveSavePresentationSimulator/Logs/Test/Test-DriveAndSave-2026.10.25_11-24-07--0400.xcresult`.

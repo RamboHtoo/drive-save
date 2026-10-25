@@ -25,6 +25,7 @@ run_suite recording "${common[@]}" "$services/TripUploadBuilder.swift" Tests/Rec
 run_suite v2 "${common[@]}" Tests/V2IntegrationTests.swift
 run_suite telemetry "${common[@]}" "$models/LiveTelemetry.swift" Tests/LiveTelemetryTests.swift
 run_suite presentation "${common[@]}" "$models/PresentationData.swift" "$models/TripExportPayload.swift" "$models/VehicleCatalogModels.swift" "$models/TestCalculationModels.swift" "${api[@]}" "$services/TripStore.swift" "$services/APIClient.swift" "$services/TestCalculationService.swift" DriveAndSave/MockData/DemoData.swift DriveAndSave/ViewModels/AppViewModel.swift DriveAndSave/ViewModels/BackendViewModel.swift Tests/PresentationTests.swift
+run_suite sample_receipt "${common[@]}" "$models/SampleTripReceipt.swift" "$services/TripUploadBuilder.swift" Tests/SampleTripReceiptTests.swift
 bash Tests/check_presentation_boundary.sh
 if [ "$#" -gt 0 ]; then
     "${PYTHON:-python3}" Tests/check_recording_compatibility.py --backend "$1"
