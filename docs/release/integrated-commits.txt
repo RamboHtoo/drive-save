@@ -1,0 +1,47 @@
+Source commits reachable from backend/ios and absent from original main; followed by release integration commits.
+
+e945ece424cc53faf8076f3d175b0beb6c29123a Add FastAPI backend skeleton with API contract
+5f72dc7ec2d7ae44628388460181d8dc20f615d5 Add Docker Compose stack with Caddy HTTPS and deployment guide
+581db6f2c5d24f56d97a15c65afce6010e9a521e Implement foreground trip recording
+8c9c845995967016cf5d658f46406af8a251b9d0 Point the API docs at the live Vultr deployment
+e599300ce7e721fea79caf07891600c45b11e41f Replace placeholder fuel pricing with a flat $1 per harsh event
+e051c1f58729c63cddba723d15bc091cb38345e0 Add car picker and pass full trip, event and vehicle data to the cost model
+d6f0e874550020e8807ed1c55a51c6a78a2cab7a Add Tiger Data schema, analytics queries, and demo fixtures
+d03d532d02cf89b3225d46a1b7a4cf7c2c6708e6 Require a speed trace around every event and pass it to the cost model
+ed5a8f746780edea351ebd2a5c186b45c8abbba0 Pass the app's vehicle data to the cost model unchanged
+24996da0fd3b3af29e19565041f486ecae004b41 Align trip uploads with the Tiger Data schema and pass the US average fuel price
+d3e5d6bddf811367e37a9825c70dcb68747cf601 Rank drivers against each other inside their crew
+e0fe6a9f847ac5c38c90985423bff15b491af156 Merge origin/analytics into backend: shared Tiger Data schema and queries
+096c45b9f63b79ad5d0b7fb86d343d0af7c01497 Store everything in Tiger Data instead of memory
+feb2c26493169840440b787949d3ddab831c5028 Integrate iOS with backend API and leagues
+e54786965bca34cc7642ed3e575b6ddbe45e3004 Keep the leaderboard fields the iOS app decodes
+d8c7c65bf413c2c4857e7f278bf2ae9e997f935a Add a one-command Tiger Cloud setup script
+02d08c9577f4299098c21debfae84cdbfa0bea22 Stop setup-tiger.sh when Tiger is at another schema version
+fca254157d086883db81df3b83f57af5209f49f0 Add user onboarding and online leagues
+f6b4c69129e4a5235fdc70538398516f9a6455d3 Add individual league analytics and schema v4 migrations
+9c92a841d9c3af8753787daa639298fd635bb42a Add experimental Mazda5 fuel model and phone trip scoring
+270bb0b24064af12485530772ef3c9c5e5ffba4a Merge origin/analytics: schema v4 with leagues, migrations 002-004, Mazda5 model
+bd100cbf6e4823fc74a0fcfacc7e4d9d9ebf74aa Move the backend to the shared schema v4 (leagues)
+802969062b5ba4733de343693c816633b07e0921 Price trips with the data teammate's Mazda5 fuel model
+74fc45941d3d4196baa85d142d8a97d23345b74e New UI design
+92ffeb7475a3e1e4af89d5d7cb28dd6f95b1c6d7 Add the EPA vehicle list with per-car fuel model parameters
+9254aa920b2b82fb168e181e443d08838073aabd Fix vehicle lookups with a plus sign and EPA data errors
+0f5208cb9ff50c898cd560618ce6a63bca1c16c3 Price each trip as the driver's car, diesel at the diesel price
+bed061bc12a1b341c5cad5dd4a9daa0efccf73f4 docs: describe fuel model support for multiple vehicles
+dcff4c265d0c19ba750dddaca91b54dee83dbf7c Rename fuel model version to vehicle-fuel-v1
+99c07bad52a38137255d004e24993501223c3f9a Added car change and test
+f63bef0c21ad95c789d05f2a8d14ac724b5607b3 Add a script that seeds the four-player demo league
+6c1d4e90324069ee0a8d9538eda7b9f4cc43e356 Test that demo trips never count in a real league's standings
+11c6fcc335e81d45ec7c3715385d10db548c8f07 Return 422 for text the database can't store, JSON for any 500
+e0fdd6a7ccc4544cce002cee897fe66ce02c5738 Clean up demo tools and trip history
+2d943286f84d42a856e3ee705aa965658e0fc168 Only let crew members view a crew
+f02de5d7d7d4d88ef4a438cf590447346f320109 Keep recorded and test trips in separate accounts
+354588549c31d9fdd03a6665ec2c703912384ad6 Score trips within observed GPS windows
+0d759862f50b94a75e46a147a7a636a1ab0f803a iOS fix
+908467ffa78e920c51646900731a3b185a8ee8d8 Merge remote-tracking branch 'origin/analytics' into backend
+5094a01bb2844cfd9819ad8b8ec55f13dc26acf5 Update API tests and sample receipt for fuel model v2
+b8779fdb31c7f09418fcdd74c5052f9e5bd05a5b Fix GPS scoring preflight and detector completeness
+77f8b2dcc9788517e484a47ee1928efe81016875 feat(ios): fix GPS validation, improve motion coverage, add live telemetry and demo leaderboard
+e34d1cde002771a8abfe9ed0fb72c4cda0d8d30f Merge backend for HackPSU release
+879dbbd80bb6d84415cf1b83dbd13f1a5c51e139 Merge iOS for HackPSU release
+dbd743aef038f9fff73a00abe0e6648d2891798c Integrate weekly cost standings and isolated league showcase
