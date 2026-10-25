@@ -9,11 +9,10 @@ struct SampleTripReceiptView: View {
             Text(preview.recordedDate.formatted(date: .abbreviated, time: .shortened))
                 .font(.subheadline).foregroundStyle(DS.secondary)
             ReceiptPaper {
-                Text("Sample estimate").font(DS.technical).accessibilityIdentifier("sampleReceiptLabel")
+                Text("Estimated fuel impact").font(DS.technical).accessibilityIdentifier("sampleReceiptLabel")
                 Text(SampleTripReceipt.vehicle).font(.title2.bold()).accessibilityIdentifier("sampleReceiptVehicle")
                 FinancialNumber(value: SampleTripReceipt.total, ink: DS.background).accessibilityIdentifier("sampleReceiptTotal")
                 Text("Illustrative avoidable fuel cost").font(.headline)
-                Text("Not a server-scored receipt").font(.caption)
             }
             VStack(spacing: 0) {
                 ReceiptLedgerLine(label: "Recorded distance", value: preview.distance).accessibilityIdentifier("sampleReceiptDistance")
@@ -27,7 +26,7 @@ struct SampleTripReceiptView: View {
                     ReceiptLedgerLine(label: line.label, value: line.amount)
                 }
                 MeasurementRule()
-                ReceiptLedgerLine(label: "Sample estimate", value: SampleTripReceipt.total, emphasized: true)
+                ReceiptLedgerLine(label: "Estimated fuel impact", value: SampleTripReceipt.total, emphasized: true)
             }
             Text("Distance and duration come from this saved trip. Dollar amounts and category allocations are illustrative, not calculated from its sensor data. This preview is not included in actual or sample weekly totals.")
                 .font(.caption).foregroundStyle(DS.secondary)

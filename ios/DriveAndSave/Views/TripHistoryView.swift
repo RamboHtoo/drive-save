@@ -45,7 +45,7 @@ struct TripHistoryView: View {
                 }.buttonStyle(.plain).accessibilityIdentifier("historyTrip-\(trip.title)")
                 if SampleTripReceipt.isAvailable(for: trip) {
                     NavigationLink { SampleTripReceiptView(trip: trip) } label: {
-                        Label("Sample estimate · Mazda MAZDA5", systemImage: "doc.text")
+                        Label("Estimated fuel impact · Mazda MAZDA5", systemImage: "doc.text")
                             .font(.subheadline).foregroundStyle(DS.acid).frame(minHeight: 44)
                     }.accessibilityIdentifier("sampleReceipt-\(trip.id)")
                 }

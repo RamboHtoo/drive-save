@@ -46,7 +46,7 @@ struct TripReceiptView: View {
                 Text(trip.hasEstimate ? "Experimental demo estimate; no actual fuel use or savings measured." : "Experimental estimates may differ from actual fuel use and costs.").font(.caption).foregroundStyle(DS.secondary)
             }
             if SampleTripReceipt.isAvailable(for: trip) {
-                NavigationLink("View sample estimate") { SampleTripReceiptView(trip: trip) }
+                NavigationLink("View estimated fuel impact") { SampleTripReceiptView(trip: trip) }
                     .accessibilityIdentifier("openSampleReceipt")
             }
             Surface {
