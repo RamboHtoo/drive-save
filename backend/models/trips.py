@@ -131,6 +131,12 @@ class Assumption(BaseModel):
 class Receipt(BaseModel):
     trip_id: UUID
     distance_mi: float
+    scored_distance_mi: float | None = Field(default=None, description="GPS-covered miles used for the estimate and rankings; distance_mi remains the uploaded distance")
+    scoring_started_at: AwareDatetime | None = None
+    scoring_ended_at: AwareDatetime | None = None
+    scoring_duration_seconds: float | None = None
+    monetary_scope: str | None = None
+    quality_flags: list[str] = Field(default_factory=list)
     events: list[ReceiptEvent]
     avoidable_cost_usd: float = Field(description="Avoidable cost of the trip: its priced events plus any driving above 65 mph")
     high_speed_cost_usd: float | None = Field(default=None, description="The part of avoidable_cost_usd from driving above 65 mph")

@@ -48,6 +48,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--postgres-only", action="store_true", required=True)
     parser.add_argument("--with-model", action="store_true", help="Also test Mazda5 math + asyncpg scoring end to end")
+    parser.add_argument("--with-gps-backend", action="store_true", help="Test Swift GPS payload through both scoring/storage adapters (requires backend dependencies)")
     args = parser.parse_args()
     required = ("initdb", "pg_ctl", "psql", "createdb")
     binaries = {name: shutil.which(name) for name in required}
@@ -117,6 +118,9 @@ def main():
                 print(sql((ROOT / "tests/model_receipts.sql").read_text()))
                 if args.with_model:
                     print(command([sys.executable, str(ROOT / "tests/model_storage_integration.py"),
+                                   "--socket", tmp, "--database", mode]))
+                if args.with_gps_backend:
+                    print(command([sys.executable, str(ROOT / "tests/gps_storage_integration.py"),
                                    "--socket", tmp, "--database", mode]))
                 print(f"PASS: {mode} install, reruns, constraints and individual analytics")
         finally:

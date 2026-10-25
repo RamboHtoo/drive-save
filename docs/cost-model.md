@@ -12,12 +12,16 @@ The backend prices every trip with the data teammate's fuel model, [`drive_save_
   - `event_recording_incomplete`: `events_complete` wasn't `true`
   - `missing_detector_version`: the trip has no `detector_version`
   - `invalid_event_duration`: an event has no `duration_s`
-  - `missing_boundary_speed`, `gps_gap_over_three_seconds`, `valid_time_coverage_below_95_percent`: readings must start at `started_at`, end at `ended_at`, cover the trip and leave no gap over 3 s
+  - `gps_boundary_gap_over_three_seconds`: the first/last valid GPS reading is more than 3 s from the session start/end
+  - `scoring_window_too_short`: less than 3 s between the first and last valid observations
+  - `gps_gap_over_three_seconds`, `valid_time_coverage_below_95_percent`: interior gaps must be at most 3 s and direct coverage at least 95% of the original session, including unobserved edges in the denominator
+  - `event_outside_scoring_window`: an event extends beyond the first/last valid observations; it is not silently dropped
   - `distance_mismatch_over_10_percent`: `distance_mi` must match the readings within 10%
   - `event_speed_disagrees_with_trace`: an event's `speed_before_mph` and `speed_after_mph` must match GPS within 2 m/s
   - `missing_braking_comparison_history`, `braking_cruise_scenario_unsupported`: a harsh brake needs steady driving at its starting speed just before it
 
   [`docs/fuel-model.md`](fuel-model.md) lists every gate.
+- **GPS window.** The model prices only the interval between valid GPS observations and never extrapolates to recording-button times. Trimmed receipts carry `gps_window_trimmed`, an explicit partial-coverage label, and window details. Metrics, baselines, and the savings ledger use `scored_distance_mi`, while the stored upload keeps its original distance and timestamps. See [the scoring-window contract](gps-scoring-window.md).
 - **Price.** The US average price of the car's fuel from EIA, week of 2026-10-19: regular gasoline at $4.284/gal, or on-highway diesel at $6.276/gal for a diesel car. The price, the car and every model assumption make one immutable scoring configuration, with an id derived from its contents. A new price makes a new configuration, so every driver's baseline starts again.
 
 ## Where it plugs in
@@ -83,7 +87,7 @@ The US average retail price of the car's fuel, from the EIA weekly series: `{"ke
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `model_name` | string | Model version, `vehicle-fuel-v1`; shown on the receipt as `cost_model` |
+| `model_name` | string | Model version, `vehicle-fuel-v2`; shown on the receipt as `cost_model` |
 | `status` | string | `scored` or `insufficient_data` |
 | `event_costs_usd` | list | One per input event, in the same order; null when the trip isn't priced |
 | `fuel_gal` | number or null | The trip's fuel budget from label MPG, not measured fuel |

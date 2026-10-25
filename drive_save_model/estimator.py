@@ -14,7 +14,7 @@ from .physics import (DATA, DEFAULT_PARAMETERS, G, MPH_TO_MPS, LBF_TO_N,
                       brake_scenario, acceleration_scenario, high_speed_scenario, parameters)
 from .trace import TraceError, finite_number, prepare_trace, timestamp
 
-MODEL_VERSION = "vehicle-fuel-v1"
+MODEL_VERSION = "vehicle-fuel-v2"
 PROFILE_ID = "mazda5-2012-auto-31284-epa-config1"
 NOTION_SOURCE = "https://app.notion.com/p/Cost-Model-Math-40309f8ad9ef81b29ec9e1043882320a"
 
@@ -143,8 +143,10 @@ def _events(events, trip, time, speed, profile, price):
             raise TraceError("invalid_event_peak")
         t0 = timestamp(event.get("ts")) - timestamp(trip["started_at"])
         t1 = t0 + duration
-        if t0 < 0 or t1 > time[-1]:
+        if t0 < 0 or t1 > timestamp(trip["ended_at"]) - timestamp(trip["started_at"]):
             raise TraceError("event_outside_trip")
+        if t0 < time[0] or t1 > time[-1]:
+            raise TraceError("event_outside_scoring_window")
         endpoints = [event.get("speed_before_mph"), event.get("speed_after_mph")]
         if any(not finite_number(v) or not 0 <= v <= 120 for v in endpoints):
             raise TraceError("missing_or_invalid_event_speed")
@@ -158,9 +160,9 @@ def _events(events, trip, time, speed, profile, price):
                 raise TraceError("brake_speed_direction_invalid")
             detail = brake_scenario(v1, v2, duration, profile)
             support_start = t0 - detail["preceding_seconds"]
-            if support_start < -1e-6:
+            if support_start < time[0] - 1e-6:
                 raise TraceError("missing_braking_comparison_history")
-            support_start = max(0.0, support_start)
+            support_start = max(float(time[0]), support_start)
             context_times = np.r_[support_start, time[(time > support_start) & (time < t0)], t0]
             if np.max(np.abs(np.interp(context_times, time, speed) - v1)) > 2:
                 raise TraceError("braking_cruise_scenario_unsupported")
@@ -211,22 +213,43 @@ def estimate_trip(vehicle_profile, speed_samples, trip_metadata, scoring_config,
         breakdown["high_speed"] = high["cost_usd"]
         avoidable = sum(breakdown.values())
         distance = diagnostics["integrated_distance_mi"]
-        average_mph = distance / (float(time[-1]) / 3600)
+        average_mph = distance / (diagnostics["scoring_duration_seconds"] / 3600)
         weight = min(1.0, max(0.0, (48.3 - average_mph) / (48.3 - 21.2)))
         # Budget estimate only: no fabricated measured total or subtracted "twin" total.
         fuel = distance * (weight / vehicle_profile["city_mpg"] + (1-weight) / vehicle_profile["highway_mpg"])
+        # A malformed profile must not turn arithmetic failure into a scored receipt.
+        # Check components too: a positive total could hide a negative event amount.
+        financials = [fuel, fuel * price, avoidable, high["fuel_gal"], high["cost_usd"],
+                      *(e[key] for e in receipts for key in ("fuel_gal", "cost_usd"))]
+        diagnostics_numbers = [value for detail in [high, diagnostics, *receipts]
+                               for value in detail.values()
+                               if isinstance(value, (int, float)) and not isinstance(value, bool)]
+        if (any(not finite_number(value) or value < 0 for value in financials)
+                or any(not finite_number(value) for value in diagnostics_numbers)):
+            raise TraceError("invalid_model_output")
+        scored_distance = round(distance, 6)
+        if scored_distance <= 0:
+            raise TraceError("invalid_model_output")
         result.update(status="scored", fuel_gal=fuel, avoidable_usd=avoidable, estimated_trip_cost_usd=fuel*price,
                       quality_flags=["experimental_estimate", "flat_road_warm_engine_assumed",
                                      "traffic_feasibility_unverified", "fuel_cutoff_assumed", "lab_and_event_accuracy_unverified"])
+        if diagnostics["window_trimmed"]:
+            result["quality_flags"].append("gps_window_trimmed")
         result["model_details"].update({"scoring_config_id": scoring_config["id"],
             "vehicle_profile": vehicle_profile, "assumptions": scoring_config["assumptions"],
             "fuel_gal_basis": "approximate_label_mpg_budget_not_measured_fuel",
             "trip_budget_city_weight": weight, "estimated_trip_cost_usd": fuel * price,
+            "scored_distance_mi": scored_distance,
+            "monetary_scope": "observed_gps_window",
             "events": receipts, "high_speed": high, "cost_breakdown_usd": breakdown,
             "avoidable_usd": avoidable, "events_complete": True,
             "detector_version": trip_metadata["detector_version"],
-            "receipt_label": "Estimated fuel savings; accuracy not yet validated",
+            "receipt_label": ("Estimated fuel savings for GPS-covered portion only; accuracy not yet validated"
+                              if diagnostics["window_trimmed"] else
+                              "Estimated fuel savings; accuracy not yet validated"),
             "comparison_label": "Fuel difference under assumed earlier-coasting, enrichment, and 65 mph scenarios"})
     except TraceError as exc:
         result["quality_flags"] = [str(exc)]
+    except (OverflowError, ZeroDivisionError, FloatingPointError):
+        result["quality_flags"] = ["invalid_model_output"]
     return result

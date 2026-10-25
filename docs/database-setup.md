@@ -106,16 +106,22 @@ under the same client_trip_id is a conflict. Compare canonical payloads with sav
 trip/events/samples; do not blindly upsert them. Persist all rows atomically.
 
 Assign slots 1–3 to the first eligible accepted trips, separately by user,
-scoring_config_id and is_demo. Eligibility requires scored status and distance >=
-1 mile. The unique constraint prevents a fourth baseline slot; do not renumber
+scoring_config_id and is_demo. Eligibility requires scored status, reported distance
+>= 1 mile, and GPS-scored distance >= 1 mile. The unique constraint prevents a fourth baseline slot; do not renumber
 slots for late uploads. A configuration change starts a new baseline. Freeze the
-baseline after slot 3; calculate it as SUM(avoidable_usd)/SUM(distance_mi).
+baseline after slot 3; calculate it as SUM(avoidable_usd)/SUM(scored_distance_mi).
+For v2, scored distance is stored in `model_result.scored_distance_mi` at six
+decimals. Historical receipts without that field keep their original reported
+distance. Reapply `analytics/queries.sql` with the v2 application update; its
+baseline and quality functions handle both formats without rewriting history.
 
 On successful scoring, insert trip_metrics using INSERT ... SELECT from the
-stored trip: ts = started_at, identical identity/configuration/distance/cost/demo
+stored trip: ts = started_at, identical identity/configuration/cost/demo
 fields, and is_baseline = (baseline_slot IS NOT NULL). Do this in the scoring
 transaction. Do not insert metrics for unscored trips, or use client dollar values.
 This prevents duplicated trip totals when events are joined for receipts.
+For v2, `trip_metrics.distance_mi` and the savings ledger use the model's scored
+distance; keep `trips.distance_mi` and its timestamps unchanged for retry checks.
 
 UTC calendar weeks begin Monday; a whole trip belongs to its start day. Later-trip
 improvement is (baseline - weekly cost per mile)/baseline. Keep negative results;
