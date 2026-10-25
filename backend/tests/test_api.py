@@ -282,8 +282,21 @@ def test_wrong_join_code_is_rejected(client):
     res = client.post(f"/crews/{crew['crew_id']}/join", json={"join_code": "WRONG1"}, headers=outsider)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "wrong_join_code"
-    # Non-members never see the join code.
-    assert client.get(f"/crews/{crew['crew_id']}", headers=outsider).json()["join_code"] is None
+
+
+def test_only_members_can_view_a_crew(client):
+    _, creator = new_user(client, "creator")
+    crew = client.post("/crews", json={"name": "East Halls"}, headers=creator).json()
+    _, outsider = new_user(client, "outsider")
+
+    res = client.get(f"/crews/{crew['crew_id']}", headers=outsider)
+    assert res.status_code == 403
+    assert res.json()["error"]["code"] == "forbidden"
+    assert "join_code" not in res.text and "creator" not in res.text  # no code, no member nicknames
+
+    client.post(f"/crews/{crew['crew_id']}/join", json={"join_code": crew["join_code"]}, headers=outsider)
+    seen = client.get(f"/crews/{crew['crew_id']}", headers=outsider).json()
+    assert (seen["member_count"], seen["join_code"]) == (2, crew["join_code"])
 
 
 def test_leaderboard_ranks_members_inside_the_callers_crew(client):
@@ -700,7 +713,7 @@ def test_driver_belongs_to_one_crew_at_a_time(client):
 
     moved = client.post(f"/crews/{second['crew_id']}/join", json={"join_code": second["join_code"]}, headers=alex).json()
     assert moved["member_count"] == 2
-    assert client.get(f"/crews/{first['crew_id']}", headers=alex).json()["member_count"] == 0
+    assert client.get(f"/crews/{first['crew_id']}", headers=alex).status_code == 403  # alex left it
 
 
 def test_cost_model_input_without_optional_event_fields(client, model_inputs):

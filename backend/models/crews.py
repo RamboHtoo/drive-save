@@ -25,7 +25,7 @@ class CrewMember(BaseModel):
 class Crew(BaseModel):
     crew_id: UUID
     name: str
-    join_code: str | None = Field(description="Only returned to crew members")
+    join_code: str = Field(description="Crews are only returned to their members")
     members: list[CrewMember]
     member_count: int
     active: bool = Field(description=f"True once the crew has {MIN_ACTIVE_MEMBERS} or more members")

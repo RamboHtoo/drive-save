@@ -36,7 +36,7 @@ Validation errors (422) use `code: "validation_error"` and add a `details` list 
 | `GET /trips/{trip_id}/cost-input` | Exactly what the cost model receives for a trip (owner only) | Done |
 | `POST /crews` | Create a crew; the creator joins automatically | Done |
 | `POST /crews/{crew_id}/join` | Join with `{"join_code": "..."}` | Done |
-| `GET /crews/{crew_id}` | Members, count, `active` (4+ members) | Done |
+| `GET /crews/{crew_id}` | Members, count, `active` (4+ members) (members only) | Done |
 | `GET /leaderboard` | The members of your crew, ranked against each other | Done |
 
 Not in the skeleton yet: `POST /games` + `WS /ws/games/{code}`, `POST /admin/demo/reset`.
@@ -142,7 +142,8 @@ Trips are priced by the data teammate's fuel model ([`docs/cost-model.md`](cost-
 
 - A driver belongs to one crew at a time. Creating or joining another crew moves them out of their current one.
 - The competition counts once the crew has 4 or more members (`active: true`).
-- `join_code` is 6 characters (no 0/O or 1/I), case-insensitive, and only returned to members. Put `crew_id` and `join_code` in the QR code.
+- Crews are private. `GET /crews/{crew_id}` returns `403` with `forbidden` unless you are a member, so a driver who moved to another crew can no longer read the old one.
+- `join_code` is 6 characters (no 0/O or 1/I) and case-insensitive. Put `crew_id` and `join_code` in the QR code.
 - `GET /leaderboard` (no parameters) ranks the members of your crew. If you aren't in a crew it returns `404` with `not_in_crew`.
 - The baseline is a driver's first 3 priced trips of at least a mile. `improvement_pct` = (baseline − this week's waste per mile) ÷ baseline × 100, counting only this week's later trips (weeks start Monday 00:00 UTC). Ties share a rank.
 - Each standing has a `state`: `ready`, `collecting_baseline`, `zero_baseline` (the baseline had no harsh events) or `no_weekly_trips`. Drivers who aren't `ready` come last, with `rank` and `improvement_pct` set to null and `est_savings_usd` set to 0.
