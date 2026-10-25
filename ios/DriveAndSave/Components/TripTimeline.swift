@@ -9,7 +9,7 @@ struct TripTimeline: View {
     }
     var body: some View {
         Surface {
-            Eyebrow(text: trip.isWalkingTest ? "GPS observations / time" : "Driving timeline / observations")
+            Eyebrow(text: trip.isWalkingTest ? "GPS timeline" : "Timeline")
             if !speeds.isEmpty {
                 Chart(speeds, id: \.sample_seq) { sample in
                     if let speed = sample.speed_mps {
@@ -23,7 +23,7 @@ struct TripTimeline: View {
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) { _ in AxisValueLabel(format: .dateTime.hour().minute()).foregroundStyle(DS.secondary) } }
                 .frame(height: 160).accessibilityLabel("Timestamped GPS speed observations, in meters per second")
                 Text(trip.source == .simulated ? "SIMULATED GPS · SPEED IN M/S" : "DEVICE GPS · SPEED IN M/S").font(DS.technical).foregroundStyle(DS.secondary)
-                Text("Points are observations. Missing intervals are not joined or interpolated.").font(.caption).foregroundStyle(DS.secondary)
+                Text("GPS gaps excluded.").font(.caption).foregroundStyle(DS.secondary)
             }
             if !events.isEmpty {
                 Chart(events) { event in
@@ -41,8 +41,7 @@ struct TripTimeline: View {
                 Text("Candidate classifications, not confirmed unsafe maneuvers.").font(.caption).foregroundStyle(DS.secondary)
             }
             if speeds.isEmpty && events.isEmpty {
-                Text("No timestamped observations available.").font(.headline)
-                Text("This receipt has no recorded timeline to display. Aggregate counts are not converted into invented event times.").font(.subheadline).foregroundStyle(DS.secondary)
+                Text("No timeline available.").font(.headline)
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("tripTimeline")
     }

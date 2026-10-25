@@ -41,12 +41,37 @@ actor BackendAPIClient {
         credential = stored; mockLeague = nil
         return APIIdentity(userID: user.user_id, nickname: user.nickname)
     }
+    func vehicleMakes() async throws -> [String] {
+        if case .mock = mode { return ["Mazda", "Tesla"] }
+        return try APIJSON.decoder().decode(VehicleMakesResponse.self, from: await request("vehicles/makes", method: "GET", protected: false)).makes
+    }
+    func vehicleModels(make: String) async throws -> [String] {
+        if case .mock = mode { return try mockCatalog().filter { $0.details.make == make }.map { $0.details.model } }
+        return try APIJSON.decoder().decode(VehicleModelsResponse.self, from: await request("vehicles/models", method: "GET", protected: false, query: [.init(name: "make", value: make)])).models
+    }
+    func vehicleYears(make: String, model: String) async throws -> [Int] {
+        if case .mock = mode { return try mockCatalog().filter { $0.details.make == make && $0.details.model == model }.map { $0.details.year }.sorted(by: >) }
+        return try APIJSON.decoder().decode(VehicleYearsResponse.self, from: await request("vehicles/years", method: "GET", protected: false, query: [.init(name: "make", value: make), .init(name: "model", value: model)])).years
+    }
+    func vehicleDetails(_ choice: VehicleChoice) async throws -> CatalogVehicle {
+        if case .mock = mode {
+            guard let row = try mockCatalog().first(where: { $0.choice == choice }) else { throw BackendError.server(404, nil) }
+            return row
+        }
+        let vehicle = try APIJSON.decoder().decode(CatalogVehicle.self, from: await request("vehicles/details", method: "GET", protected: false, query: [.init(name: "make", value: choice.make), .init(name: "model", value: choice.model), .init(name: "year", value: String(choice.year))]))
+        guard vehicle.choice == choice else { throw BackendError.invalidResponse }
+        return vehicle
+    }
+    private func mockCatalog() throws -> [CatalogVehicle] {
+        try ["catalog-mazda5", "catalog-cybertruck"].map { try BackendFixtures.load($0, as: CatalogVehicle.self) }
+    }
     func putVehicle(_ row: VehicleRow) async throws -> VehicleRow {
         let data = try APIJSON.encoder().encode(row)
         guard (1...200).contains(row.count), data.count < 20_000 else { throw BackendError.invalidInput("Vehicle must be a complete JSON object with 1–200 fields under 20 KB.") }
-        selectedVehicle = row
-        if case .mock = mode { return row }
-        return try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "PUT", body: data))
+        if case .mock = mode { selectedVehicle = row; return row }
+        let saved = try APIJSON.decoder().decode(VehicleRow.self, from: await request("users/me/vehicle", method: "PUT", body: data))
+        selectedVehicle = saved
+        return saved
     }
     func getVehicle() async throws -> VehicleRow {
         if case .mock = mode { guard let selectedVehicle else { throw BackendError.invalidInput("No vehicle selected.") }; return selectedVehicle }
@@ -56,9 +81,27 @@ actor BackendAPIClient {
         if case .remote = mode {
             guard payload.is_demo == demoOnly else { throw BackendError.invalidInput("Demo uploads require an isolated replay account; real uploads require the normal driver account.") }
         }
+        return try await uploadBody(payload, data: APIJSON.encoder().encode(payload), vehicle: vehicle)
+    }
+    /// Calculation tests may only run through an isolated demo client, never the driver's client.
+    func ensureCalculationIdentity(driverID: UUID) async throws {
+        guard demoOnly else { throw BackendError.invalidInput("Calculation tests require an isolated demo account.") }
+        if try identity() == nil { _ = try await register(nickname: "Drive Save Calculation Demo", demoAccount: true) }
+        guard let testIdentity = try identity(), testIdentity.userID != driverID else { throw BackendError.invalidInput("The test account must be different from your driver account.") }
+    }
+    func uploadSyntheticFixture(_ data: Data, vehicle: VehicleRow) async throws -> APITripCreated {
+        let payload = try APIJSON.decoder().decode(APITripPayload.self, from: data)
+        guard demoOnly, payload.source == "synthetic", payload.is_demo else {
+            throw BackendError.invalidInput("Calculation tests must use an isolated account and a synthetic/demo fixture.")
+        }
+        return try await uploadBody(payload, data: data, vehicle: vehicle)
+    }
+    private func uploadBody(_ payload: APITripPayload, data: Data, vehicle: VehicleRow) async throws -> APITripCreated {
         try TripUploadBuilder.validate(payload)
+        if !payload.is_demo && vehicle["supported"] == .bool(false) {
+            throw BackendError.invalidInput("This vehicle is not supported for fuel estimates. Your trip remains on this iPhone.")
+        }
         _ = try await putVehicle(vehicle) // Must precede pricing, including after auth recovery.
-        let data = try APIJSON.encoder().encode(payload)
         if case .mock = mode {
             if let previous = mockUploads[payload.client_trip_id] {
                 guard previous.0 == data else { throw BackendError.server(409, nil) }
@@ -109,7 +152,10 @@ actor BackendAPIClient {
     private func request(_ path: String, method: String, body: Data? = nil, protected: Bool = true, recover: Bool = true, query: [URLQueryItem] = []) async throws -> Data {
         guard case .remote(let baseURL) = mode, baseURL.scheme == "https" else { throw BackendError.invalidInput("Remote API requires HTTPS.") }
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { components.queryItems = query }
+        if !query.isEmpty {
+            components.queryItems = query
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let url = components.url else { throw BackendError.invalidResponse }
         var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body; request.timeoutInterval = 25
         request.setValue("application/json", forHTTPHeaderField: "Accept")

@@ -19,7 +19,7 @@ final class ScrollLayoutTests: XCTestCase {
         XCTAssertGreaterThan(status.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         XCTAssertLessThanOrEqual(status.frame.maxY, tabBar.frame.minY,
                                  "The entire final status message must clear the floating tab bar")
-        let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Walking Tests, demo replays,")).firstMatch
+        let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Walking Tests and demo trips")).firstMatch
         XCTAssertTrue(footer.isHittable)
         XCTAssertLessThanOrEqual(footer.frame.maxY, tabBar.frame.minY)
         XCTAssertGreaterThanOrEqual(app.scrollViews.firstMatch.frame.maxY, tabBar.frame.minY,
@@ -281,23 +281,26 @@ final class BackendFlowTests: XCTestCase {
     @MainActor
     func testOfflineRegistrationVehicleReplayReceiptAndLeague() throws {
         let app = XCUIApplication(); app.launchOffline()
-        app.buttons["API & Vehicle"].tap()
+        app.buttons["openProfile"].tap()
+        app.openAdvancedSettings()
         XCTAssertTrue(app.staticTexts["Signed in as HackPSU Demo"].waitForExistence(timeout: 5))
         tap(app.buttons["loadVehicleExample"], app: app)
         tap(app.buttons["saveVehicle"], app: app)
         tap(app.buttons["uploadReplay"], app: app)
         for _ in 0..<3 where !app.staticTexts["PLACEHOLDER PRICING"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["PLACEHOLDER PRICING"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["cost_model: flat_per_event"].exists)
-        XCTAssertTrue(app.staticTexts["is_estimate: true"].exists)
         let receipt = XCTAttachment(screenshot: app.screenshot()); receipt.name = "Placeholder server receipt"; receipt.lifetime = .keepAlways; add(receipt)
+        let details = app.buttons["Advanced Settings"]
+        app.scrollFullyIntoView(details); details.tap()
+        XCTAssertTrue(app.staticTexts["cost_model: flat_per_event"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["is_estimate: true"].exists)
         app.openMain("Leagues")
         app.buttons["Create League"].tap()
         app.textFields["leagueName"].tap(); app.textFields["leagueName"].typeText("Offline Test League")
         app.buttons["createLeague"].tap()
         XCTAssertTrue(app.staticTexts["Current league: Offline Test League"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.staticTexts["1 members · Unranked — needs 4+ members"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["1 member · 4 needed to rank"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Individual driver rankings"].exists)
     }
 }
@@ -318,17 +321,25 @@ final class RemoteAuthenticationTests: XCTestCase {
         XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 30))
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, nickname)
+        app.openAdvancedSettings()
         let id = app.staticTexts["profileUserID"].label
         app.terminate(); app.launch()
         XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 10))
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, nickname)
+        app.openAdvancedSettings()
         XCTAssertEqual(app.staticTexts["profileUserID"].label, id)
     }
 }
 
 /// Every offline test uses a fresh Keychain/local API namespace, never an existing driver account.
 extension XCUIApplication {
+    @MainActor
+    func openAdvancedSettings() {
+        let link = buttons["openAdvancedSettings"]
+        scrollFullyIntoView(link); link.tap()
+        XCTAssertTrue(staticTexts["profileUserID"].waitForExistence(timeout: 5))
+    }
     @MainActor
     func scrollFullyIntoView(_ element: XCUIElement) {
         for _ in 0..<18 {

@@ -42,6 +42,8 @@ struct ReceiptLedgerLine: View {
 struct BackendReceiptCard: View {
     let receipt: APIReceipt
     let mock: Bool
+    var showDetailsLink = true
+    var syntheticCalculation = false
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             ReceiptPaper {
@@ -51,37 +53,59 @@ struct BackendReceiptCard: View {
                     Text("PLACEHOLDER PRICING").font(.headline).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(alignment: .top) { Rectangle().fill(DS.background).frame(height: 2) }
-                    Text("Flat pricing per candidate event. This amount is not measured fuel waste or achieved savings.").font(.subheadline)
+                    Text("Per-event placeholder · not measured fuel waste or savings.").font(.subheadline)
                 }
-                FinancialNumber(value: receipt.avoidable_cost_usd.dollars, ink: DS.background)
-                Text(receipt.is_estimate ? "Estimated cost output" : "Returned cost output").font(.headline)
-                Text("cost_model: \(receipt.cost_model)").font(.caption.monospaced())
-                Text("is_estimate: \(receipt.is_estimate ? "true" : "false")").font(.caption.monospaced())
-                Text("Server distance: \(receipt.distance_mi, specifier: "%.2f") mi").font(.subheadline)
-                Text("REF / \(receipt.trip_id.uuidString)").font(.caption2.monospaced()).textSelection(.enabled)
-            }.accessibilityIdentifier("serverReceiptDocument")
+                if syntheticCalculation {
+                    Text("Vehicle used for pricing").font(.caption)
+                    Text(receipt.vehicle ?? "Not reported by server").font(.headline).accessibilityIdentifier("calculationPricingVehicle")
+                }
+                FinancialNumber(value: syntheticCalculation ? receipt.avoidable_cost_usd.formatted(.currency(code: "USD").precision(.fractionLength(2...4))) : receipt.avoidable_cost_usd.dollars, ink: DS.background)
+                Text(syntheticCalculation ? "Estimated avoidable fuel cost" : receipt.is_estimate ? "Estimated cost" : "Returned cost").font(.headline)
+                if let label = receipt.label { Text(label).font(.subheadline) }
+                else if syntheticCalculation { Text("Estimate · accuracy not validated").font(.subheadline) }
+                if syntheticCalculation { Text("Model: \(receipt.cost_model)").font(.caption.monospaced()).accessibilityIdentifier("calculationModel") }
+            }.accessibilityElement(children: .contain).accessibilityIdentifier("serverReceiptDocument")
+            if let highSpeedCost = receipt.high_speed_cost_usd { ReceiptLedgerLine(label: "High-speed portion", value: highSpeedCost.dollars) }
             VStack(alignment: .leading, spacing: 16) {
-                Eyebrow(text: "Event line items")
+                Eyebrow(text: "Event costs")
                 if receipt.events.isEmpty { Text("No priced events returned.").foregroundStyle(DS.secondary) }
                 ForEach(Array(receipt.events.enumerated()), id: \.offset) { _, event in
                     VStack(alignment: .leading, spacing: 8) {
-                        ReceiptLedgerLine(label: event.type, value: event.cost_usd.dollars)
+                        ReceiptLedgerLine(label: event.type == "harsh_brake" ? "Harsh braking" : event.type == "rapid_accel" ? "Rapid acceleration" : event.type == "sharp_turn" ? "Sharp turn" : event.type, value: event.cost_usd.dollars)
                         Text("\(event.ts.formatted(date: .omitted, time: .standard)) · \(event.speed_before_mph, specifier: "%.1f") → \(event.speed_after_mph, specifier: "%.1f") mph").font(.caption.monospaced()).foregroundStyle(DS.secondary)
                         MeasurementRule()
                     }
                 }
             }
             VStack(alignment: .leading, spacing: 16) {
-                Eyebrow(text: "Financial assumptions")
+                DisclosureGroup("Pricing assumptions") {
                 ForEach(Array(receipt.assumptions.enumerated()), id: \.offset) { _, assumption in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("\(assumption.key): \(assumption.value.formatted()) \(assumption.unit)").font(.subheadline.weight(.semibold))
+                        Text("\(assumption.key.replacingOccurrences(of: "_", with: " ").capitalized): \(assumption.value.formatted()) \(assumption.unit)").font(.subheadline.weight(.semibold))
                         Text("As of \(assumption.as_of) · \(assumption.is_estimate ? "team estimate" : "published input")").font(.subheadline).foregroundStyle(DS.secondary)
                         if let source = assumption.source_url, let url = URL(string: source), ["https", "http"].contains(url.scheme ?? "") { Link("Source", destination: url) }
                         MeasurementRule()
                     }
                 }
+                    ForEach(receipt.notes ?? [], id: \.self) { note in Text(note).font(.caption).foregroundStyle(DS.secondary) }
+                }.accessibilityIdentifier("pricingAssumptions")
+                if showDetailsLink {
+                    NavigationLink("Advanced Settings") { Screen { ReceiptServerDetails(receipt: receipt) }.navigationTitle("Advanced Settings").navigationBarTitleDisplayMode(.inline) }
+                }
             }
         }
+    }
+}
+
+struct ReceiptServerDetails: View {
+    let receipt: APIReceipt
+    var body: some View {
+        Surface {
+            Eyebrow(text: "Server details")
+            Text("cost_model: \(receipt.cost_model)")
+            Text("is_estimate: \(receipt.is_estimate ? "true" : "false")")
+            Text("Server distance: \(receipt.distance_mi, specifier: "%.2f") mi")
+            Text("Trip ID: \(receipt.trip_id.uuidString)").textSelection(.enabled)
+        }.font(.caption.monospaced())
     }
 }

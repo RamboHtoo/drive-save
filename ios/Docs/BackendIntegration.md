@@ -1,3 +1,5 @@
+> Historical integration record. The current searchable vehicle catalog picker and account-scoped vehicle persistence are documented in [VehiclePicker.md](VehiclePicker.md). Technical JSON import is now under Advanced Settings. No trip/receipt/scoring contract migration is part of the vehicle-picker task.
+
 # Drive Save backend integration
 
 Contract: https://github.com/RamboHtoo/drive-save/blob/backend/docs/api.md

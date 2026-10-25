@@ -108,6 +108,9 @@ struct APITripPayload: Codable {
     var is_demo: Bool
     let events: [APITripEvent]
     let speed_samples: [APISpeedSample]
+    // Optional for backward compatibility. Never assert completeness for old recordings.
+    var events_complete: Bool? = nil
+    var detector_version: String? = nil
 }
 struct APITripCreated: Codable { let trip_id: UUID; let receipt_url: String; let duplicate: Bool }
 struct APIReceiptEvent: Codable, Hashable {
@@ -125,6 +128,10 @@ struct APIReceipt: Codable, Hashable {
     let assumptions: [APIAssumption]
     let is_estimate: Bool
     var is_demo: Bool
+    var high_speed_cost_usd: Double? = nil
+    var vehicle: String? = nil
+    var label: String? = nil
+    var notes: [String]? = nil
 }
 struct APILeagueMember: Codable, Identifiable { let user_id: UUID; let nickname: String; let joined_at: Date; var id: UUID { user_id } }
 struct APILeague: Codable, Identifiable {
@@ -164,7 +171,7 @@ enum BackendError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .server(let status, let body):
-            let prefix = status == 409 ? "Trip conflict. The saved upload was not changed. " : status == 422 ? "Validation failed. " : ""
+            let prefix = body?.code == "trip_not_scored" ? "Trip not scored. No estimate was produced. " : status == 409 ? "Trip conflict. The saved upload was not changed. " : status == 422 ? "Validation failed. " : ""
             let details = body?.details?.map { $0.loc.map(\.display).joined(separator: ".") + ": " + $0.msg }.joined(separator: "\n") ?? ""
             return prefix + (body?.message ?? "Server returned HTTP \(status).") + (details.isEmpty ? "" : "\n" + details)
         case .invalidResponse: return "The server returned an unexpected response."

@@ -1,0 +1,34 @@
+{
+  "vehicle_id": "493f5d33-8d03-5451-9175-9cfa60873281",
+  "make": "Tesla",
+  "model": "Cybertruck AWD",
+  "year": 2026,
+  "supported": false,
+  "specs": {
+    "fuel_type": "electricity",
+    "vehicle_type": "Truck",
+    "engine_displacement_l": 0.001,
+    "cylinders": null,
+    "rated_horsepower": 621.0,
+    "transmission": "Automatic",
+    "gears": 1,
+    "drive": "All Wheel Drive",
+    "test_weight_lb": 7000.0
+  },
+  "mpg": {
+    "city": null,
+    "highway": null,
+    "combined": null,
+    "is_estimate": true
+  },
+  "parameters": [],
+  "flags": [
+    "electricity_not_modeled"
+  ],
+  "source": {
+    "dataset": "EPA Test Car List",
+    "test_vehicle_id": "CD225-059245",
+    "test_configuration": 0,
+    "configurations_tested": 1
+  }
+}

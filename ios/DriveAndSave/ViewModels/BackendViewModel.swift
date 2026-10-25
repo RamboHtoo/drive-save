@@ -14,6 +14,7 @@ private struct BackendLocalState: Codable {
     var offlineLeague: APILeague?
     var vehicle: VehicleRow?
     var vehicleConfirmed = false
+    var vehicleSelections: [String: SavedVehicleSelection]?
     var leagueByUser: [String: UUID] = [:]
     var uploads: [String: SavedUpload] = [:]
     var replay: APITripPayload?
@@ -55,14 +56,14 @@ final class BackendViewModel: ObservableObject {
         guard isRestoringAccount else { return }
         await connect(remote: state.remoteMode ?? true, baseURL: state.baseURL ?? remoteURL)
         isRestoringAccount = false
-        if identity != nil { await refreshLeague() }
+        if identity != nil { await refreshLeague(); await refreshMyVehicle() }
     }
     var connectionURL: String { remoteURL }
     func resetAccount() async {
         await run {
             try await api.resetLocalAccount()
             if !isRemote { state.offlineLeague = nil; try persist() }
-            identity = nil; league = nil; standings = []; notice = nil
+            identity = nil; vehicle = nil; vehicleConfirmed = false; league = nil; standings = []; notice = nil
         }
     }
     private func persist() throws {
@@ -80,7 +81,7 @@ final class BackendViewModel: ObservableObject {
         catch { errorMessage = error.localizedDescription }
         do {
             let updated = try await api.identity()
-            if identity != updated { identity = updated; league = nil; standings = [] }
+            if identity != updated { identity = updated; try restoreLocalVehicle(); league = nil; standings = [] }
             if let message = await api.takeResetNotice() { notice = message; recoveryMessage = message; league = nil; standings = [] }
         } catch { errorMessage = error.localizedDescription }
     }
@@ -94,34 +95,113 @@ final class BackendViewModel: ObservableObject {
             isRemote = remote; identity = nil; league = nil; standings = []
             notice = remote ? "Remote API selected. Register or restore your saved Keychain session before uploading." : "Offline mock API selected. Nothing is sent to the server."
             identity = try await api.identity()
+            try restoreLocalVehicle()
             state.remoteMode = remote; state.baseURL = baseURL; try persist()
         }
     }
     func register(nickname: String, demoAccount: Bool) async {
-        await run { identity = try await api.register(nickname: nickname, demoAccount: demoAccount); league = nil; standings = []; notice = isRemote ? "Registered. Credentials saved securely in Keychain." : "Offline mock user registered. No network request was made." }
+        await run { identity = try await api.register(nickname: nickname, demoAccount: demoAccount); try restoreLocalVehicle(); league = nil; standings = []; notice = isRemote ? "Registered. Credentials saved securely in Keychain." : "Offline mock user registered. No network request was made." }
     }
     func selectVehicle(json: String, confirmed: Bool) {
         do {
             let data = Data(json.utf8)
             let row = try APIJSON.decoder().decode(VehicleRow.self, from: data)
             guard !row.isEmpty, row.count <= 200, data.count < 20_000 else { throw BackendError.invalidInput("EPA row must contain 1–200 fields and be under 20 KB.") }
-            state.vehicle = row; state.vehicleConfirmed = confirmed
-            try persist(); vehicle = row; vehicleConfirmed = confirmed
+            guard let owner = identity?.userID else { throw BackendError.invalidInput("Complete welcome registration first.") }
+            try storeVehicle(row, confirmed: confirmed, synced: false, owner: owner)
             notice = "Vehicle row saved locally with its original field names."
         } catch { errorMessage = error.localizedDescription }
     }
     func updateVehicle() async {
         await run {
             guard identity != nil, let vehicle else { throw BackendError.invalidInput("Register and select an EPA vehicle row first.") }
-            _ = try await api.putVehicle(vehicle); notice = "Vehicle profile uploaded. Future trips use this vehicle snapshot."
+            let saved = try await api.putVehicle(vehicle)
+            guard let owner = try await api.identity()?.userID else { throw BackendError.expiredSession }
+            try storeVehicle(saved, confirmed: vehicleConfirmed, synced: true, owner: owner)
+            notice = "Vehicle profile uploaded. Future trips use this vehicle snapshot."
         }
     }
     func fetchVehicle() async {
         await run {
-            let row = try await api.getVehicle(); state.vehicle = row; state.vehicleConfirmed = false
-            try persist(); vehicle = row; vehicleConfirmed = false; notice = "Server vehicle loaded. Confirm it matches your vehicle before a real upload."
+            let row = try await api.getVehicle()
+            guard let owner = try await api.identity()?.userID else { throw BackendError.expiredSession }
+            try storeVehicle(row, confirmed: false, synced: true, owner: owner)
+            notice = "Server vehicle loaded. Confirm it matches your vehicle before a real upload."
         }
     }
+    // Catalog requests are public and keep their loading/error state in the picker.
+    func vehicleMakes() async throws -> [String] { try await api.vehicleMakes() }
+    func vehicleModels(make: String) async throws -> [String] { try await api.vehicleModels(make: make) }
+    func vehicleYears(make: String, model: String) async throws -> [Int] { try await api.vehicleYears(make: make, model: model) }
+    func vehicleDetails(_ choice: VehicleChoice) async throws -> CatalogVehicle { try await api.vehicleDetails(choice) }
+
+    func saveCatalogVehicle(_ selected: CatalogVehicle) async -> Bool {
+        var savedSuccessfully = false
+        await run {
+            guard identity != nil else { throw BackendError.expiredSession }
+            let row = try await api.putVehicle(selected.row)
+            let saved = try CatalogVehicle(row: row)
+            guard saved.choice == selected.choice, let owner = try await api.identity()?.userID else { throw BackendError.invalidResponse }
+            try storeVehicle(row, confirmed: true, synced: true, owner: owner)
+            notice = isRemote ? "Vehicle saved." : "Vehicle saved in offline demo only."
+            savedSuccessfully = true
+        }
+        return savedSuccessfully
+    }
+
+    func refreshMyVehicle() async {
+        guard identity != nil, isRemote else { return }
+        // Advanced imports are drafts until explicitly uploaded; don't replace a user's pending edit.
+        if let owner = identity?.userID, state.vehicleSelections?[key(owner)]?.synced == false { return }
+        await run {
+            guard let owner = identity?.userID else { return }
+            do {
+                let row = try await api.getVehicle()
+                let currentOwner = try await api.identity()?.userID ?? owner
+                try storeVehicle(row, confirmed: (try? CatalogVehicle(row: row)) != nil, synced: true, owner: currentOwner)
+            } catch BackendError.server(404, let body) where body?.code == "vehicle_not_set" {
+                try storeVehicle(nil, confirmed: false, synced: true, owner: try await api.identity()?.userID ?? owner)
+            }
+        }
+    }
+
+    var canTestCalculation: Bool {
+        guard isRemote, let owner = identity?.userID, vehicle != nil else { return false }
+        return state.vehicleSelections?[key(owner)]?.synced == true
+    }
+    func calculationService() throws -> TestCalculationService {
+        guard canTestCalculation, let driverID = identity?.userID, let url = URL(string: remoteURL) else {
+            throw BackendError.invalidInput("Save your vehicle to the online account before testing a calculation.")
+        }
+        let isolated = BackendAPIClient(mode: .remote(url), demoOnly: true,
+            credentialStore: KeychainCredentialStore(account: remoteURL + credentialSuffix + "#calculation-demo-" + driverID.uuidString))
+        return TestCalculationService(api: isolated, driverID: driverID)
+    }
+
+    private func restoreLocalVehicle() throws {
+        // Migrate the legacy single-vehicle cache only into the currently saved account/mode.
+        if state.vehicleSelections == nil {
+            var selections: [String: SavedVehicleSelection] = [:]
+            if let owner = identity?.userID, let row = state.vehicle,
+               (state.remoteMode ?? true) == isRemote, (state.baseURL ?? remoteURL) == remoteURL {
+                selections[key(owner)] = .init(row: row, confirmed: state.vehicleConfirmed, synced: false)
+            }
+            state.vehicleSelections = selections
+            state.vehicle = nil; state.vehicleConfirmed = false
+            try persist()
+        }
+        let saved = identity.flatMap { state.vehicleSelections?[key($0.userID)] }
+        vehicle = saved?.row; vehicleConfirmed = saved?.confirmed ?? false
+    }
+
+    private func storeVehicle(_ row: VehicleRow?, confirmed: Bool, synced: Bool, owner: UUID) throws {
+        let previous = state
+        if state.vehicleSelections == nil { state.vehicleSelections = [:] }
+        state.vehicleSelections?[key(owner)] = row.map { .init(row: $0, confirmed: confirmed, synced: synced) }
+        do { try persist() } catch { state = previous; throw error }
+        vehicle = row; vehicleConfirmed = confirmed
+    }
+
     func receipt(for trip: Trip) -> APIReceipt? {
         _ = revision
         guard let id = trip.clientTripID, let record = state.uploads[key(id)], record.mock == !isRemote else { return nil }
@@ -156,6 +236,9 @@ final class BackendViewModel: ObservableObject {
         let uploadKey = key(payload.client_trip_id)
         if state.uploads[uploadKey] == nil {
             guard let vehicle else { throw BackendError.invalidInput("Select the complete EPA vehicle JSON row first.") }
+            if !payload.is_demo, vehicle["supported"] == .bool(false) || (try? CatalogVehicle(row: vehicle))?.supportsFuelModel == false {
+                throw BackendError.invalidInput("This vehicle is not supported for fuel estimates. Choose another vehicle in Profile → My Vehicle. Your trip remains saved locally.")
+            }
             if !payload.is_demo && !vehicleConfirmed { throw BackendError.invalidInput("Confirm the selected EPA row matches your actual vehicle before uploading a real trip.") }
             state.uploads[uploadKey] = SavedUpload(payload: payload, vehicle: vehicle, owner: identity.userID, mock: !isRemote)
             try persist() // Freeze the UUID, full request, and vehicle before the first network attempt.

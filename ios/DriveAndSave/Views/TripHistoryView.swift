@@ -7,18 +7,12 @@ struct TripHistoryView: View {
     private var visibleTrips: [Trip] { includeWalkingTests ? model.trips : model.drivingTrips }
     var body: some View {
         Screen {
-            if model.client.isMock { Text("Demo cost chart · device recordings labeled below").font(.caption).foregroundStyle(DS.secondary) }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Every drive\ntells a story.").font(.system(size: 34, weight: .bold, design: .rounded)).tracking(-0.8)
-                Text("See where a smoother journey could take you.").foregroundStyle(DS.secondary)
-            }
-            Surface {
-                Eyebrow(text: "Avoidable fuel cost by trip")
-                Text(model.avoidableCost.dollars).font(.largeTitle.bold()).foregroundStyle(DS.mint)
-                Text("Modeled total · sample trips").font(.caption).foregroundStyle(DS.secondary)
+            DisclosureGroup("Cost trend") {
+                DemoNotice()
+                Text("Sample estimates · not measured savings").font(.caption).foregroundStyle(DS.secondary)
                 Chart(model.estimatedTrips.sorted { $0.date < $1.date }) { trip in
                     BarMark(x: .value("Date", trip.date, unit: .day), y: .value("Estimated dollars", trip.avoidableCost))
-                        .foregroundStyle(DS.mint.gradient).cornerRadius(5)
+                        .foregroundStyle(DS.acid)
                         .accessibilityLabel(trip.title).accessibilityValue(trip.avoidableCost.dollars)
                 }
                 .chartYAxis { AxisMarks(position: .leading) { value in AxisGridLine().foregroundStyle(.white.opacity(0.08)); AxisValueLabel { if let amount = value.as(Double.self) { Text(amount.dollars) } } } }
@@ -26,9 +20,8 @@ struct TripHistoryView: View {
                 .frame(height: 180)
             }
             Toggle("Include Walking Tests", isOn: $includeWalkingTests).accessibilityIdentifier("includeWalkingTests")
-            Text("Walking Tests never contribute to driving costs or league rankings.").font(.caption).foregroundStyle(DS.secondary)
-            Text("Trip archive").font(.title2.bold())
-            Surface {
+            Text("Walking Tests are excluded from costs and rankings.").font(.caption).foregroundStyle(DS.secondary)
+            VStack(alignment: .leading, spacing: 16) {
                 if visibleTrips.isEmpty { ContentUnavailableView("No trips yet", systemImage: "car.side", description: Text("Completed drives will appear here.")) }
                 ForEach(visibleTrips) { trip in
                     NavigationLink { TripReceiptView(trip: trip) } label: {
@@ -37,7 +30,6 @@ struct TripHistoryView: View {
                             TripRow(trip: trip)
                         }
                     }.buttonStyle(.plain).accessibilityIdentifier("historyTrip-\(trip.title)")
-                    if trip.id != visibleTrips.last?.id { Divider() }
                 }
             }
         }.navigationTitle("Trip history").navigationBarTitleDisplayMode(.inline).refreshable { await model.load() }

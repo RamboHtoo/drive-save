@@ -1,3 +1,5 @@
+> The staged redesign below is a historical implementation record. The subsequent UI simplification keeps its visual system and removes redundant content: Home has no league promotion or recent trips; History opens to the archive; Profile is compact; technical controls are under Advanced Settings; receipt assumptions expand on demand. See README for current navigation.
+
 # Drive Save visual system
 
 ## Direction
@@ -80,4 +82,12 @@ These are app screenshots from isolated offline test accounts. Financial values 
 - [Placeholder server receipt](DesignPreviews/placeholder-receipt.png)
 - [Simulated observation timeline](DesignPreviews/timeline.png)
 
-The six PNGs under `Docs/DesignPreviews` are documentation artifacts, outside the app target. They are not bundled app assets.
+The PNGs under `Docs/DesignPreviews` are documentation artifacts, outside the app target. They are not bundled app assets.
+
+## UI simplification verification (2026-10-24)
+
+- Final signed simulator build and all 12 offline UI tests passed on iPhone 17 Pro Max (iOS 26.4), including accessibility XXXL scrolling, registration/Keychain persistence/confirmed reset, league creation/invites, vehicle/replay/placeholder receipt, receipt disclosures and advanced details, simulated trip persistence, denied location, foreground interruptions, Walking Test filtering/persistence and unchanged standings.
+- iPhone 17e also passed Home, league, account, vehicle/replay, all four recording, footer-clearance, and walking flows. An initial receipt test incorrectly expected export from a legacy demo without upload metadata; the corrected test verifies that no fabricated export is offered and passed in the final suite.
+- 34 model/GPS/persistence checks and 34 backend contract/auth/serialization/invitation checks passed.
+- Reviewed final Home, Leagues, History, local receipt, placeholder pricing, and footer screenshots. Updated documentation previews, including [History](DesignPreviews/history.png).
+- No model, sensor service, API client, scoring, backend, or analytics source changed. No production mutations were run for this UI cleanup. Physical-device driving accuracy remains outside these simulator UI checks.

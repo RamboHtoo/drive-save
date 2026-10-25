@@ -17,12 +17,7 @@ struct APISettingsView: View {
                 Button("Apply connection") { Task { await backend.connect(remote: remote, baseURL: baseURL) } }.buttonStyle(.bordered)
                 Text(backend.isRemote ? "Remote · requests go to the selected server" : "Offline mock · no server requests").font(.caption).foregroundStyle(DS.mint)
             }
-            Surface {
-                Eyebrow(text: "Driver profile")
-                if let identity = backend.identity { Text("Signed in as \(identity.nickname)").font(.headline) }
-                Text("Manage your account in Profile. Vehicle setup is only needed before uploading trips.").font(.subheadline).foregroundStyle(DS.secondary)
-                NavigationLink("Open Profile") { ProfileView() }
-            }
+            AccountAdvancedSettings()
             Surface {
                 Eyebrow(text: "Complete EPA vehicle row")
                 Text("Import your selected EPA JSON row without changing its field names. The supplied 2026 Honda Civic row is a backend example, not an assumed vehicle profile.").font(.subheadline).foregroundStyle(DS.secondary)
@@ -37,7 +32,7 @@ struct APISettingsView: View {
                 Toggle("This EPA row matches my actual vehicle", isOn: $confirmedVehicle)
                 Button("Save vehicle selection") { backend.selectVehicle(json: vehicleJSON, confirmed: confirmedVehicle) }.buttonStyle(.bordered).accessibilityIdentifier("saveVehicle")
                 if let row = backend.vehicle {
-                    Text("Selected: \(row["model_year"]?.display ?? "") \(row["make"]?.display ?? "") \(row["model"]?.display ?? "")").font(.headline)
+                    Text("Selected: \(row.vehicleTitle)").font(.headline)
                     Text("\(row.count) original fields · \(backend.vehicleConfirmed ? "confirmed vehicle" : "example / unconfirmed")").font(.caption).foregroundStyle(DS.secondary)
                 }
                 HStack {
@@ -53,7 +48,7 @@ struct APISettingsView: View {
             }
             BackendStatusView()
         }
-        .navigationTitle("API & Vehicle").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Advanced Settings").navigationBarTitleDisplayMode(.inline)
         .disabled(backend.isBusy)
         .onAppear { remote = backend.isRemote; baseURL = backend.connectionURL; loadSelectedVehicle() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
@@ -74,7 +69,7 @@ struct APISettingsView: View {
 struct BackendStatusView: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
-        if backend.isBusy { ProgressView("Contacting API…") }
+        if backend.isBusy { ProgressView("Connecting…") }
         if let notice = backend.notice { Text(notice).font(.subheadline).foregroundStyle(DS.mint).textSelection(.enabled) }
         if let error = backend.errorMessage { Text(error).font(.subheadline).foregroundStyle(.orange).textSelection(.enabled) }
     }
@@ -85,14 +80,14 @@ struct TripUploadSection: View {
     @EnvironmentObject private var backend: BackendViewModel
     var body: some View {
         Surface {
-            Eyebrow(text: "Backend receipt")
+            Eyebrow(text: "Receipt")
             if let reason = backend.unsupportedReason(for: trip) {
                 Text(reason).font(.subheadline).foregroundStyle(DS.secondary)
             } else {
                 Text(trip.source == .simulated ? "Demo replay upload · excluded from real competition" : "Recorded sensor trip · detector accuracy remains unvalidated").font(.caption).foregroundStyle(DS.secondary)
-                Button("Upload / retry & fetch receipt") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
+                Button("Upload trip") { Task { await backend.upload(trip: trip) } }.buttonStyle(IgnitionButtonStyle()).disabled(backend.isBusy)
             }
-            NavigationLink("API & Vehicle setup") { APISettingsView() }
+            NavigationLink("My Vehicle") { MyVehicleView() }
             BackendStatusView()
         }
     }

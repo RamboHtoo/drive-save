@@ -14,6 +14,9 @@ final class HomeDesignTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["homeHeadline"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["homeFinancialValue"].exists)
         XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].exists)
+        XCTAssertFalse(app.staticTexts["Recent drives"].exists)
+        XCTAssertFalse(app.staticTexts["Your championship"].exists)
+        XCTAssertFalse(app.buttons["API & Vehicle"].exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Home instrument panel"; screenshot.lifetime = .keepAlways; add(screenshot)
         let start = app.buttons["startTrip"]
         for _ in 0..<3 where !start.isHittable { app.swipeUp() }
@@ -40,7 +43,7 @@ final class LeagueDesignTests: XCTestCase {
         app.buttons["createLeague"].tap()
         XCTAssertTrue(app.staticTexts["Current league: APEX / 04"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.staticTexts["1 members · Unranked — needs 4+ members"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["1 member · 4 needed to rank"].waitForExistence(timeout: 5))
         for _ in 0..<4 { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(app.otherElements["currentDriverStanding"].exists)
         XCTAssertTrue(app.staticTexts["YOU"].exists)
@@ -55,6 +58,12 @@ final class ReceiptDesignTests: XCTestCase {
         let app = XCUIApplication()
         app.launchOffline()
         app.openMain("History")
+        XCTAssertFalse(app.staticTexts["DEMO · SIMULATED DATA"].exists, "The sample chart should start collapsed")
+        let history = XCTAttachment(screenshot: app.screenshot()); history.name = "History archive"; history.lifetime = .keepAlways; add(history)
+        let trend = app.buttons["Cost trend"]
+        trend.tap()
+        XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].waitForExistence(timeout: 5))
+        trend.tap()
         let trip = app.buttons["historyTrip-Campus → downtown"]
         XCTAssertTrue(trip.waitForExistence(timeout: 5))
         for _ in 0..<16 {
@@ -71,10 +80,15 @@ final class ReceiptDesignTests: XCTestCase {
         XCTAssertFalse(app.buttons["nav-Home"].exists)
         XCTAssertTrue(app.staticTexts["DEMO · SIMULATED DATA"].exists)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Editorial local receipt"; shot.lifetime = .keepAlways; add(shot)
-        XCTAssertTrue(app.staticTexts["No timestamped observations available."].exists)
+        XCTAssertTrue(app.staticTexts["No timeline available."].exists)
         for _ in 0..<5 { app.scrollViews.firstMatch.swipeUp() }
-        let assumptions = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "All measurements and excess fuel on this demo receipt")).firstMatch
-        XCTAssertTrue(assumptions.exists)
+        let assumptions = app.buttons["Assumptions"]
+        app.scrollFullyIntoView(assumptions); assumptions.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Simulated inputs and illustrative excess fuel")).firstMatch.exists)
+        let advanced = app.buttons["receiptAdvancedSettings"]
+        app.scrollFullyIntoView(advanced); advanced.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Local ID:")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Export API JSON"].exists, "Legacy demo trips must not gain fabricated upload fields")
     }
 }
 

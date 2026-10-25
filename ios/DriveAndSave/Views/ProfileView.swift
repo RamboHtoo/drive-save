@@ -10,24 +10,21 @@ struct WelcomeView: View {
     var body: some View {
         NavigationStack {
             Screen {
-                Image(systemName: "leaf.circle.fill").font(.system(size: 60)).foregroundStyle(DS.mint)
-                Eyebrow(text: "Welcome to Drive Save")
-                Text("Waste less.\nDrive together.").font(.system(size: 38, weight: .bold, design: .rounded))
-                Text("Choose a driver nickname, then create a private league or join your friends.").foregroundStyle(DS.secondary)
+                DisplayType("Welcome.", size: 48)
                 Surface {
-                    Text("What should we call you?").font(.title2.bold())
+                    Text("Your driver name").font(.title2.bold())
                     TextField("Nickname", text: $nickname).textContentType(.nickname)
                         .autocorrectionDisabled().submitLabel(.done).focused($editingNickname)
                         .accessibilityIdentifier("welcomeNickname")
                         .onSubmit { editingNickname = false }
-                    Text("1–32 characters. Your league members will see this name.").font(.caption).foregroundStyle(DS.secondary)
+                    Text("1–32 characters · visible to your league.").font(.caption).foregroundStyle(DS.secondary)
                     Toggle("Offline demo", isOn: $offline).accessibilityIdentifier("offlineOnboarding")
-                    Text(offline ? "Only this iPhone. No server requests or multiplayer. Demo data stays separate from your remote account." : "Online multiplayer · \(URL(string: backend.connectionURL)?.host ?? "your selected server"). Each iPhone gets its own secure account.")
-                        .font(.subheadline).foregroundStyle(DS.secondary)
+                    Text(offline ? "This iPhone only · no multiplayer" : "Online · account saved on this iPhone")
+                        .font(.caption).foregroundStyle(DS.secondary)
                     if !offline {
-                        DisclosureGroup("Development options") {
+                        DisclosureGroup("Advanced Settings") {
                             Toggle("Demo account recovery", isOn: $allowRecovery)
-                            Text("Optional: if the server rejects your token, register a replacement demo account and show a reset notice. Previous server trips and league membership may be lost.").font(.caption).foregroundStyle(DS.secondary)
+                            Text("Allow a replacement demo account after a server reset. Previous trips and league membership may be lost.").font(.caption).foregroundStyle(DS.secondary)
                         }.font(.subheadline)
                     }
                     Button(offline ? "Continue with offline demo" : "Join Drive Save") {
@@ -55,56 +52,56 @@ struct WelcomeView: View {
 
 struct ProfileView: View {
     @EnvironmentObject private var backend: BackendViewModel
-    @State private var confirmingReset = false
     var body: some View {
         Screen {
+            DisplayType(backend.identity?.nickname ?? "No account", size: 44).accessibilityIdentifier("profileNickname")
+            Text(backend.isRemote ? "Online" : "Offline demo · this iPhone only").font(DS.technical).foregroundStyle(DS.acid)
             Surface {
-                Eyebrow(text: "Your driver profile")
-                Text(backend.identity?.nickname ?? "No account").font(.largeTitle.bold()).accessibilityIdentifier("profileNickname")
-                Text(backend.isRemote ? "Online multiplayer account" : "Offline demo account · this device only").foregroundStyle(DS.mint)
-                if let identity = backend.identity {
-                    Text("User ID: \(identity.userID.uuidString)").font(.caption).foregroundStyle(DS.secondary).textSelection(.enabled).accessibilityIdentifier("profileUserID")
-                }
-                Text("Your account is saved securely on this iPhone. A nickname is not a login; entering the same name on another phone creates a separate driver.").font(.subheadline).foregroundStyle(DS.secondary)
-            }
-            Surface {
-                Eyebrow(text: "League membership")
+                Eyebrow(text: "League")
                 if let league = backend.league {
-                    Text(league.name).font(.title2.bold())
-                    Text("\(league.member_count) members · \(league.canRank ? "Ranked league" : "Needs 4+ for ranked play")").foregroundStyle(DS.mint)
+                    Text(league.name).font(DS.section)
+                    Text("\(league.member_count) \(league.member_count == 1 ? "member" : "members") · \(league.canRank ? "Ranked" : "4 needed to rank")").foregroundStyle(DS.secondary)
                     LeagueInviteActions(league: league)
-                } else {
-                    Text("No league loaded. Create or join one in Leagues; refresh to check saved membership.").foregroundStyle(DS.secondary)
-                }
+                } else { Text("No league joined").foregroundStyle(DS.secondary) }
                 Button("Refresh membership") { Task { await backend.refreshLeague() } }.disabled(backend.isBusy)
             }
             Surface {
-                Eyebrow(text: "Connection mode")
-                Text(backend.isRemote ? "Friends on other iPhones use the online backend. Offline demo is separate and cannot connect to their league." : "You are using an offline demo. Switch to online multiplayer to join friends on other iPhones.").font(.subheadline).foregroundStyle(DS.secondary)
-                Button(backend.isRemote ? "Switch to offline demo" : "Use online multiplayer") {
-                    Task {
-                        await backend.connect(remote: !backend.isRemote, baseURL: backend.connectionURL)
-                        if backend.identity != nil { await backend.refreshLeague() }
-                    }
-                }.buttonStyle(.bordered).disabled(backend.isBusy)
-                Text("Switching restores the saved account for that mode, or shows welcome registration. Neither account is renamed or replaced.").font(.caption).foregroundStyle(DS.secondary)
+                Eyebrow(text: "My Vehicle")
+                if let row = backend.vehicle {
+                    Text(row.vehicleTitle).font(.headline).accessibilityIdentifier("profileVehicleTitle")
+                    if !backend.vehicleConfirmed { Text("Example · unconfirmed").font(.caption).foregroundStyle(DS.secondary) }
+                    if row["supported"] == .bool(false) { Text("Fuel estimates unavailable").font(.caption).foregroundStyle(.orange) }
+                } else { Text("No vehicle selected").foregroundStyle(DS.secondary) }
+                NavigationLink("My Vehicle") { MyVehicleView() }.accessibilityIdentifier("myVehicle")
             }
-            NavigationLink("Vehicle & advanced settings") { APISettingsView() }
-            Surface {
-                Eyebrow(text: "Development / test accounts")
-                Text("A new nickname creates a new server account. Resetting removes this mode’s saved sign-in from this iPhone. It does not rename or delete the old server account, or erase local trip history. You cannot recover the old sign-in using its nickname.")
-                    .font(.subheadline).foregroundStyle(DS.secondary)
-                Button("Reset test account…", role: .destructive) { confirmingReset = true }
-                    .accessibilityIdentifier("resetTestAccount").disabled(backend.isBusy)
-            }
+            NavigationLink("Advanced Settings") { APISettingsView() }.accessibilityIdentifier("openAdvancedSettings")
             BackendStatusView()
         }
         .navigationTitle("Profile").navigationBarTitleDisplayMode(.inline)
-        .task { await backend.refreshLeague() }
+        .task { await backend.refreshLeague(); await backend.refreshMyVehicle() }
+    }
+}
+
+/// Explicit test-account controls belong with diagnostics, away from everyday profile details.
+struct AccountAdvancedSettings: View {
+    @EnvironmentObject private var backend: BackendViewModel
+    @State private var confirmingReset = false
+    var body: some View {
+        Surface {
+            Eyebrow(text: "Account")
+            if let identity = backend.identity {
+                Text("Signed in as \(identity.nickname)").font(.headline)
+                Text("User ID: \(identity.userID.uuidString)").font(.caption.monospaced()).foregroundStyle(DS.secondary)
+                    .textSelection(.enabled).accessibilityIdentifier("profileUserID")
+            }
+            Text("Accounts are saved separately for online and offline mode on this iPhone.").font(.caption).foregroundStyle(DS.secondary)
+            Button("Reset test account…", role: .destructive) { confirmingReset = true }
+                .accessibilityIdentifier("resetTestAccount").disabled(backend.isBusy)
+        }
         .alert("Reset this device’s test sign-in?", isPresented: $confirmingReset) {
             Button("Reset sign-in & choose a new nickname", role: .destructive) { Task { await backend.resetAccount() } }
             Button("Cancel", role: .cancel) { }
-        } message: { Text("This creates a different account next time you register. Your previous server account is not renamed or deleted. Local trips stay on this iPhone.") }
+        } message: { Text("This creates a different account next time you register. Your previous server account is not renamed or deleted. Local trips stay on this iPhone. You cannot recover the old sign-in with its nickname.") }
     }
 }
 
@@ -115,11 +112,16 @@ struct LeagueInviteActions: View {
     var body: some View {
         if let code = league.join_code {
             Text("Invite code: \(code)").font(.headline).textSelection(.enabled)
-            HStack {
-                Button(copied ? "Invite copied" : "Copy invite") { UIPasteboard.general.string = invitation; copied = true }
-                ShareLink(item: invitation) { Label("Share invite", systemImage: "square.and.arrow.up") }
+            ViewThatFits(in: .horizontal) {
+                HStack { inviteButtons }
+                VStack(alignment: .leading) { inviteButtons }
             }.buttonStyle(.bordered)
-            Text("Share both the league ID and code. Friends can paste the full invitation in Join League.").font(.caption).foregroundStyle(DS.secondary)
+        }
+    }
+    private var inviteButtons: some View {
+        Group {
+            Button(copied ? "Invite copied" : "Copy invite") { UIPasteboard.general.string = invitation; copied = true }
+            ShareLink(item: invitation) { Label("Share invite", systemImage: "square.and.arrow.up") }
         }
     }
 }

@@ -61,11 +61,11 @@ struct TripRecordingView: View {
                     mountingConfirmed = false
                     recorder.prepare(mode: selectedMode)
                 }
-            Text(walkingMode ? "Walking GPS Test" : "Ready before the road.").font(.largeTitle.bold())
+            Text(walkingMode ? "Walking GPS Test" : "Start Trip").font(.largeTitle.bold())
             Surface {
-                Label(walkingMode ? "Core Location · Walking Test" : "Only interact while parked", systemImage: walkingMode ? "figure.walk" : "checkmark.shield.fill").font(.headline).foregroundStyle(DS.mint)
-                Text(walkingMode ? "Walk outdoors with your iPhone in any comfortable position. Only GPS distance and elapsed time are recorded. Phone angle can change; no calibration is needed." : "Secure the phone in a flat mount, screen facing up and top edge pointing toward the front of the car. Start before driving. Stop only after parking.")
-                Text(walkingMode ? "Driving-event detection and fuel estimates are off. Walking Tests do not contribute to driving history totals or league rankings. Stop walking before reviewing the screen." : "Foreground recording only. Leaving the app or locking your phone ends recording; return to save the partial trip. Keep Drive Save open. No driving alerts are sent.").font(.subheadline).foregroundStyle(DS.secondary)
+                Label(walkingMode ? "GPS only" : "Only interact while parked", systemImage: walkingMode ? "figure.walk" : "checkmark.shield.fill").font(.headline).foregroundStyle(DS.mint)
+                Text(walkingMode ? "Walk outdoors. Phone angle can change; no calibration needed." : "Secure the phone in a flat mount, screen facing up and top edge pointing toward the front of the car. Start before driving. Stop only after parking.")
+                Text(walkingMode ? "GPS distance and time only. No driving events, fuel estimates, or league scores. Stop walking before reviewing." : "Keep Drive Save open. Locking the phone or leaving the app ends capture; return to save the partial trip.").font(.subheadline).foregroundStyle(DS.secondary)
                 if walkingMode { Text("Keep this screen open. Locking the phone or leaving the app ends capture; return to save.").font(.caption).foregroundStyle(DS.secondary) }
             }
             Surface {
@@ -75,7 +75,7 @@ struct TripRecordingView: View {
                     if recorder.authorization == .notDetermined {
                         Button("Enable location") { recorder.requestLocation() }.buttonStyle(.bordered).accessibilityIdentifier("enableLocation")
                     }
-                    Text("If permission is denied, elapsed time can still be saved but distance is unavailable. Enable Precise Location in iPhone Settings for better GPS readings.").font(.caption).foregroundStyle(DS.secondary)
+                    Text("Without location access, only elapsed time is saved. Enable Precise Location in Settings for better GPS.").font(.caption).foregroundStyle(DS.secondary)
                 }
             }
             if !walkingMode {
@@ -87,7 +87,7 @@ struct TripRecordingView: View {
                     Button(recorder.isCalibrated ? "Recalibrate mount" : "Calibrate mounted phone") { recorder.calibrate() }
                         .disabled(!mountingConfirmed).buttonStyle(.bordered).accessibilityIdentifier("calibrate")
                     Text(recorder.motionStatus).font(.caption).foregroundStyle(DS.secondary)
-                    Text("Without calibration, GPS trips still save, but driving events are unavailable. Calibration uses gravity and your confirmed mounting direction.").font(.caption).foregroundStyle(DS.secondary)
+                    Text("Without calibration, GPS trips save but driving events are unavailable.").font(.caption).foregroundStyle(DS.secondary)
                 }
             }
             Button {
@@ -122,7 +122,7 @@ struct TripRecordingView: View {
             Button(walkingMode ? "Stop & save Walking Test" : "Stop & save · I’m parked") { finish() }
                 .font(.headline).buttonStyle(IgnitionButtonStyle()).accessibilityIdentifier("stopTrip")
             if !walkingMode {
-            DisclosureGroup("Parked developer tools") {
+            DisclosureGroup("Advanced Settings") {
                 Button("View live sensor measurements") { showDebug = true }.padding(.vertical)
                 Text("Open only while stationary. Readings do not measure fuel consumption.").font(.caption).foregroundStyle(DS.secondary)
             }

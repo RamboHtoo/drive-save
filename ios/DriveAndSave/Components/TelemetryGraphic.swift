@@ -31,11 +31,11 @@ struct TelemetryGraphic: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Eyebrow(text: "02 / Telemetry"); Spacer(); Text(samples.isEmpty ? "STANDBY" : "SPEED / M/S").font(DS.technical).foregroundStyle(DS.secondary) }
+            HStack { Eyebrow(text: "Telemetry"); Spacer(); Text(samples.isEmpty ? "STANDBY" : "SPEED / M/S").font(DS.technical).foregroundStyle(DS.secondary) }
             if samples.isEmpty {
                 MotionLanes()
-                Text("Waiting for a speed trace.").font(.headline)
-                Text("Lane illustration · no live sensor data. A recorded drive with valid GPS speeds will appear here.").font(.caption).foregroundStyle(DS.secondary)
+                Text("No speed data yet.").font(.headline)
+                Text("Illustration · record a trip to see GPS speeds.").font(.caption).foregroundStyle(DS.secondary)
             } else {
                 Chart(samples, id: \.sample_seq) { sample in
                     if let speed = sample.speed_mps {
@@ -48,8 +48,8 @@ struct TelemetryGraphic: View {
                 .chartYAxis { AxisMarks(position: .leading) { _ in AxisGridLine().foregroundStyle(DS.rule); AxisValueLabel().foregroundStyle(DS.secondary) } }
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) { _ in AxisValueLabel(format: .dateTime.hour().minute()).foregroundStyle(DS.secondary) } }
                 .frame(height: 140).accessibilityLabel("Timestamped GPS speeds; gaps are not interpolated")
-                Text(trip?.source == .simulated ? "SIMULATED SPEED TRACE" : "RECORDED GPS · FILTERED SAMPLES").font(DS.technical).foregroundStyle(DS.secondary)
-                Text("\(samples.count) valid samples · \(trip?.displayTitle ?? "Drive"). Gaps are not interpolated.").font(.caption).foregroundStyle(DS.secondary)
+                Text(trip?.source == .simulated ? "SIMULATED SPEED TRACE" : "RECORDED GPS").font(DS.technical).foregroundStyle(DS.secondary)
+                Text("\(trip?.displayTitle ?? "Drive") · gaps excluded.").font(.caption).foregroundStyle(DS.secondary)
             }
         }.accessibilityIdentifier("telemetryGraphic")
     }

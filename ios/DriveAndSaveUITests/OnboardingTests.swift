@@ -18,6 +18,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 10))
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, "Walking Buddy")
+        XCTAssertFalse(app.staticTexts["profileUserID"].exists)
+        app.openAdvancedSettings()
         let originalID = app.staticTexts["profileUserID"].label
         app.openMain("Leagues")
         app.buttons["Create League"].tap()
@@ -25,7 +27,7 @@ final class OnboardingTests: XCTestCase {
         app.buttons["createLeague"].tap()
         XCTAssertTrue(app.staticTexts["Current league: Four Friends"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.staticTexts["1 members · Unranked — needs 4+ members"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["1 member · 4 needed to rank"].waitForExistence(timeout: 5))
         let copy = app.buttons["Copy invite"]
         for _ in 0..<4 where !copy.isHittable { app.swipeUp() }
         copy.tap()
@@ -35,10 +37,11 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(app.textFields["welcomeNickname"].exists)
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, "Walking Buddy")
-        XCTAssertEqual(app.staticTexts["profileUserID"].label, originalID)
         XCTAssertTrue(app.staticTexts["Four Friends"].waitForExistence(timeout: 5))
+        app.openAdvancedSettings()
+        XCTAssertEqual(app.staticTexts["profileUserID"].label, originalID)
         let reset = app.buttons["resetTestAccount"]
-        for _ in 0..<4 { app.scrollViews.firstMatch.swipeUp() }
+        app.scrollFullyIntoView(reset)
         XCTAssertFalse(app.buttons["nav-Home"].exists)
         XCTAssertLessThanOrEqual(reset.frame.maxY, app.frame.maxY)
         reset.tap()
@@ -55,8 +58,9 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(app.buttons["openProfile"].waitForExistence(timeout: 10))
         app.buttons["openProfile"].tap()
         XCTAssertEqual(app.staticTexts["profileNickname"].label, "Different Driver")
-        XCTAssertNotEqual(app.staticTexts["profileUserID"].label, originalID)
         XCTAssertFalse(app.staticTexts["Four Friends"].exists)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Profile after explicit test reset"; shot.lifetime = .keepAlways; add(shot)
+        app.openAdvancedSettings()
+        XCTAssertNotEqual(app.staticTexts["profileUserID"].label, originalID)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Advanced account after explicit test reset"; shot.lifetime = .keepAlways; add(shot)
     }
 }
