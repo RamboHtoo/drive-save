@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from models.common import Text
+
 MAX_SPEED_MPH = 120
 MAX_SPEED_MPS = 53.6448  # 120 mph
 MAX_EVENTS_PER_MINUTE = 10
@@ -46,7 +48,7 @@ class TripEventIn(StrictModel):
     event_id: UUID = Field(description="Generated on the phone; stays the same when the trip is re-uploaded")
     type: EventType
     ts: AwareDatetime
-    detector_version: str = Field(min_length=1, max_length=64, description='Version of the phone\'s event detector, e.g. "ios-0.1.0"')
+    detector_version: Text = Field(min_length=1, max_length=64, description='Version of the phone\'s event detector, e.g. "ios-0.1.0"')
     peak_g: float = Field(gt=0, le=2.0, description="Peak acceleration in g: forward/backward for harsh_brake and rapid_accel, sideways for sharp_turn")
     speed_before_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
     speed_after_mph: float = Field(ge=0, le=MAX_SPEED_MPH)
@@ -65,7 +67,7 @@ class TripCreate(StrictModel):
     source: Literal["recorded", "replayed", "synthetic"] = Field(default="recorded", description="Replayed and synthetic trips must be demo trips")
     is_demo: bool = False
     events_complete: bool = Field(default=False, description="True only when the phone's detector ran for the whole trip, so events lists every harsh moment")
-    detector_version: str | None = Field(
+    detector_version: Text | None = Field(
         default=None, min_length=1, max_length=64, pattern=r"\S", description='Version of the detector that ran for the trip, e.g. "ios-0.1.0"'
     )
     events: list[TripEventIn] = Field(default_factory=list)

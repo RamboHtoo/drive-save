@@ -12,7 +12,9 @@ The contract between the iOS app, the backend and analytics. The source of truth
 {"error": {"code": "wrong_join_code", "message": "That join code does not match this crew"}}
 ```
 
-Validation errors (422) use `code: "validation_error"` and add a `details` list with the field location of each problem.
+Validation errors (422) use `code: "validation_error"` and add a `details` list with the field location of each problem. An unexpected server error is a `500` with `code: "internal_error"`; retry later.
+
+- **Text:** nicknames and crew names are stored without surrounding spaces and can't be blank. No text field, including the car data sent with `PUT /users/me/vehicle`, may contain a NUL character (`\u0000`); those requests get a `422`.
 
 ## Endpoints
 

@@ -2,12 +2,14 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, Field
 
+from models.common import display_name
+
 # Mystery Stack requires groups of 4 or more; smaller crews are not ranked.
 MIN_ACTIVE_MEMBERS = 4
 
 
 class CrewCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=40)
+    name: display_name(40) = Field(description="Stored without surrounding spaces")
 
 
 class CrewJoin(BaseModel):

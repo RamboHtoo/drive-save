@@ -608,6 +608,59 @@ def test_nan_and_infinity_are_rejected(client):
     assert client.put("/users/me/vehicle", content=car, headers=json_headers).status_code == 422
 
 
+def with_detector_version(version):
+    trip = fresh_trip()
+    trip["detector_version"] = version
+    for event in trip["events"]:
+        event["detector_version"] = version
+    return trip
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        pytest.param("POST", "/users", {"nickname": "   "}, id="blank-nickname"),
+        pytest.param("POST", "/users", {"nickname": "a\u0000b"}, id="nul-in-nickname"),
+        pytest.param("POST", "/users", {"nickname": "a\ud800b"}, id="lone-surrogate-in-nickname"),
+        pytest.param("POST", "/users", {"nickname": "kai", "vehicle": {"make": "Ma\u0000zda", "model": "MAZDA5", "year": 2012}}, id="nul-in-car-choice"),
+        pytest.param("POST", "/crews", {"name": "   "}, id="blank-crew-name"),
+        pytest.param("POST", "/crews", {"name": "a\u0000b"}, id="nul-in-crew-name"),
+        pytest.param("PUT", "/users/me/vehicle", {"notes": ["ok", {"a\u0000": 1}]}, id="nul-in-vehicle-data"),
+        pytest.param("PUT", "/users/me/vehicle", {"make": "a\ud800"}, id="lone-surrogate-in-vehicle-data"),
+        pytest.param("POST", "/trips", with_detector_version("ios\u0000"), id="nul-in-detector-version"),
+        pytest.param("GET", "/vehicles/models?make=Ma%00zda", None, id="nul-in-car-picker-query"),
+    ],
+)
+def test_text_the_database_cant_store_is_rejected(client, method, path, body):
+    """Blank names and text Postgres can't store (NUL characters, lone surrogates) are validation errors, not 500s."""
+    _, headers = new_user(client)
+    # json.dumps escapes lone surrogates as \ud800, as a client's JSON encoder may send them.
+    content = json.dumps(body).encode() if body is not None else None
+    res = client.request(method, path, content=content, headers={**headers, "content-type": "application/json"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "validation_error"
+
+
+def test_names_are_stored_without_surrounding_spaces(client):
+    res = client.post("/users", json={"nickname": "  kai  "})
+    assert res.json()["nickname"] == "kai"
+    headers = {"Authorization": f"Bearer {res.json()['token']}"}
+    crew = client.post("/crews", json={"name": " Roommates "}, headers=headers).json()
+    assert (crew["name"], crew["members"][0]["nickname"]) == ("Roommates", "kai")
+
+
+def test_unexpected_errors_keep_the_error_format(monkeypatch):
+    async def broken():
+        raise RuntimeError("database fell over")
+
+    monkeypatch.setattr("repo.vehicle_makes", broken)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        res = c.get("/vehicles/makes")
+    assert res.status_code == 500
+    assert res.json()["error"]["code"] == "internal_error"
+    assert "database fell over" not in res.text  # no internals in the response
+
+
 def test_event_without_speeds_around_it_is_flagged_not_rejected(client, model_inputs):
     _, headers = new_user(client)
     trip = copy.deepcopy(SAMPLE_TRIP)

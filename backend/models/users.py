@@ -3,11 +3,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from models.common import display_name
 from models.vehicles import Vehicle, VehicleChoice
 
 
 class UserCreate(BaseModel):
-    nickname: str = Field(min_length=1, max_length=32)
+    nickname: display_name(32) = Field(description="Stored without surrounding spaces")
     vehicle: VehicleChoice | None = Field(None, description="The driver's car, picked from GET /vehicles/makes, /models and /years")
 
 

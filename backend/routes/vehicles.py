@@ -14,18 +14,20 @@ spaces suggest, then the other.
 
 from collections.abc import Awaitable, Callable
 from itertools import product
+from typing import Annotated
 from urllib.parse import unquote, unquote_plus
 
 from fastapi import APIRouter, Query, Request
 
 import repo
 from errors import ApiError
+from models.common import Text
 from models.vehicles import Vehicle, VehicleMakes, VehicleModels, VehicleYears
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
-_Make = Query(min_length=1, max_length=100, description="A brand from GET /vehicles/makes; encode a plus sign as %2B")
-_Model = Query(min_length=1, max_length=200, description="A model from GET /vehicles/models; encode a plus sign as %2B")
+_Make = Annotated[Text, Query(min_length=1, max_length=100, description="A brand from GET /vehicles/makes; encode a plus sign as %2B")]
+_Model = Annotated[Text, Query(min_length=1, max_length=200, description="A model from GET /vehicles/models; encode a plus sign as %2B")]
 
 
 def _readings(request: Request, name: str, decoded: str) -> list[str]:
@@ -52,7 +54,7 @@ async def list_makes() -> VehicleMakes:
 
 
 @router.get("/models", response_model=VehicleModels)
-async def list_models(request: Request, make: str = _Make) -> VehicleModels:
+async def list_models(request: Request, make: _Make) -> VehicleModels:
     found = await _first_found(repo.vehicle_models, _readings(request, "make", make))
     if found is None:
         raise ApiError(404, "vehicle_not_found", f"No brand {make!r} in the vehicle list")
@@ -60,7 +62,7 @@ async def list_models(request: Request, make: str = _Make) -> VehicleModels:
 
 
 @router.get("/years", response_model=VehicleYears)
-async def list_years(request: Request, make: str = _Make, model: str = _Model) -> VehicleYears:
+async def list_years(request: Request, make: _Make, model: _Model) -> VehicleYears:
     found = await _first_found(repo.vehicle_years, _readings(request, "make", make), _readings(request, "model", model))
     if found is None:
         raise ApiError(404, "vehicle_not_found", f"No model {model!r} of {make!r} in the vehicle list")
@@ -68,7 +70,7 @@ async def list_years(request: Request, make: str = _Make, model: str = _Model) -
 
 
 @router.get("/details", response_model=Vehicle)
-async def get_vehicle(request: Request, make: str = _Make, model: str = _Model, year: int = Query(ge=1900, le=2100)) -> Vehicle:
+async def get_vehicle(request: Request, make: _Make, model: _Model, year: int = Query(ge=1900, le=2100)) -> Vehicle:
     """The car's specs, MPG and fuel model parameters: what sign-up stores for the driver."""
     found = await _first_found(
         lambda make_name, model_name: repo.vehicle(make_name, model_name, year), _readings(request, "make", make), _readings(request, "model", model)

@@ -13,8 +13,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue, RootModel, model_validator
 
+from models.common import Text, storable_text
+
 MAX_FIELDS = 200
 MAX_BYTES = 20_000
+
+
+def _check_strings(value: JsonValue) -> None:
+    """Every key and string in the JSON must be text Postgres can store in jsonb."""
+    if isinstance(value, str):
+        storable_text(value)
+    elif isinstance(value, list):
+        for item in value:
+            _check_strings(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            storable_text(key)
+            _check_strings(item)
 
 
 class VehicleData(RootModel[dict[str, JsonValue]]):
@@ -30,6 +45,7 @@ class VehicleData(RootModel[dict[str, JsonValue]]):
             raise ValueError("vehicle data can't contain NaN or infinity") from None
         if len(encoded) > MAX_BYTES:
             raise ValueError(f"vehicle data must be under {MAX_BYTES} bytes")
+        _check_strings(self.root)
         return self
 
 
@@ -51,8 +67,8 @@ class VehicleYears(BaseModel):
 class VehicleChoice(BaseModel):
     """A car from the vehicle list. Matching ignores case and extra spaces."""
 
-    make: str = Field(min_length=1, max_length=100)
-    model: str = Field(min_length=1, max_length=200)
+    make: Text = Field(min_length=1, max_length=100)
+    model: Text = Field(min_length=1, max_length=200)
     year: int = Field(ge=1900, le=2100)
 
 

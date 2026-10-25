@@ -46,7 +46,13 @@ async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResp
     return _error(422, "validation_error", message, details)
 
 
+async def _unexpected_error(_: Request, exc: Exception) -> JSONResponse:
+    # Starlette still raises exc after this response, so the traceback reaches the logs; the client gets no internals.
+    return _error(500, "internal_error", "Something went wrong on the server; try again")
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _api_error)
     app.add_exception_handler(StarletteHTTPException, _http_error)
     app.add_exception_handler(RequestValidationError, _validation_error)
+    app.add_exception_handler(Exception, _unexpected_error)
